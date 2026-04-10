@@ -3,4 +3,4 @@ dist/
 .env
 public/css/output.css
 *.tsbuildinfo
-GUIDE.md
+**/GUIDE.md
