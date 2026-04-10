@@ -1,0 +1,60 @@
+// script used for migrations on db structure changes
+
+import dotenv from "dotenv";
+import path from "path";
+import fs from "fs";
+import pg from "pg";
+
+dotenv.config();
+
+// reusable variable for filepath
+const filePath: string = path.resolve(
+  __dirname,
+  "../../migrations/001_init.sql",
+);
+
+//connection to db
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
+
+//actual migration function
+async function migrate() {
+  const sql = await fs.promises.readFile(filePath, "utf-8");
+
+  let client;
+  let inTransaction: boolean = false;
+
+  try {
+    client = await pool.connect();
+
+    await client.query("BEGIN");
+    inTransaction = true;
+    await client.query(sql);
+    await client.query("COMMIT");
+  } catch (err) {
+    if (inTransaction && client) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (e) {
+        console.error("[MIGRATE] Error during rollback:", e);
+      }
+    }
+    console.error("[MIGRATE] Migration failed:", err);
+    process.exit(1);
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+}
+
+try {
+  await migrate();
+  console.log("[MIGRATE] Migration completed successfully.");
+} catch (err) {
+  console.error("[MIGRATE] Migration failed. Exiting...");
+} finally {
+  await pool.end();
+}
