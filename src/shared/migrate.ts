@@ -21,9 +21,9 @@ const pool = new pg.Pool({
 
 //actual migration function
 async function migrate() {
-  const sql = await fs.promises.readFile(filePath, "utf-8");
+  const sql: string = await fs.promises.readFile(filePath, "utf-8");
 
-  let client;
+  let client: pg.PoolClient | undefined;
   let inTransaction: boolean = false;
 
   try {
