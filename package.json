@@ -1,0 +1,42 @@
+{
+  "name": "tgbot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:bot": "nodemon --exec tsx src/bot/index.ts",
+    "dev:dashboard": "nodemon --exec tsx src/dashboard/server.ts",
+    "build": "tsc",
+    "start:bot": "node dist/bot/index.js",
+    "start:dashboard": "node dist/dashboard/server.js",
+    "db:migrate": "tsx src/shared/migrate.ts",
+    "css:build": "tailwindcss -i ./public/css/input.css -o ./public/css/output.css",
+    "css:watch": "tailwindcss -i ./public/css/input.css -o ./public/css/output.css --watch",
+    "dev": "concurrently \"npm:dev:bot\" \"npm:dev:dashboard\" \"npm:css:watch\""
+  },
+  "dependencies": {
+    "connect-pg-simple": "^10.0.0",
+    "dotenv": "^17.4.1",
+    "ejs": "^5.0.1",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "grammy": "^1.42.0",
+    "graphql": "^16.13.2",
+    "graphql-request": "^7.4.0",
+    "node-cron": "^4.2.1",
+    "pg": "^8.20.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.2.2",
+    "@types/connect-pg-simple": "^7.0.3",
+    "@types/ejs": "^3.1.5",
+    "@types/express": "^5.0.6",
+    "@types/express-session": "^1.18.2",
+    "@types/node": "^25.6.0",
+    "@types/node-cron": "^3.0.11",
+    "@types/pg": "^8.20.0",
+    "concurrently": "^9.2.1",
+    "tailwindcss": "^4.2.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "NFT Gate Bot",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:1-20-bullseye",
+  "remoteUser": "node",
+  "forwardPorts": [3000],
+  "customizations": {
+    "vscode": {
+      "extensions": ["esbenp.prettier-vscode"],
+      "settings": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "explorer.compactFolders": false,
+        "[ejs]": {
+          "editor.formatOnSave": false
+        }
+      }
+    }
+  },
+  "postCreateCommand": "npm install -g ts-node typescript nodemon prettier"
+}
