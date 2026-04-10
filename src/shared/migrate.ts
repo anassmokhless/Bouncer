@@ -5,11 +5,11 @@ import path from "path";
 import fs from "fs";
 import pg from "pg";
 
-dotenv.config();
+dotenv.config({ path: path.resolve(import.meta.dirname, "../../.env") });
 
 // reusable variable for filepath
 const filePath: string = path.resolve(
-  __dirname,
+  import.meta.dirname,
   "../../migrations/001_init.sql",
 );
 

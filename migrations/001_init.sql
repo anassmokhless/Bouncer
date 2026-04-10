@@ -39,6 +39,7 @@ create table if not exists users(
     telegram_id text unique not null,
     username text,
     first_name text,
+    wallet_address text,
     is_verified boolean not null default false,
     verified_at timestamptz,
     created_at timestamptz not null default now(),
