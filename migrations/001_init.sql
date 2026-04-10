@@ -125,14 +125,14 @@ create table if not exists session(
     primary key(sid)
 );
 
--- indexes
-create index if not exists idx_session_expire ON session (expire);
-create index if not exists idx_members_last_checked ON members (last_checked);
-create index if not exists idx_members_status ON members (status);
-create index if not exists idx_audit_logs_created_at ON audit_logs (created_at);
-create index if not exists idx_nft_rules_group_id ON nft_rules (group_id);
-create index if not exists idx_members_user_id ON members(user_id);
-create index if not exists idx_pending_verifications_expires ON pending_verifications (expires_at);
-create index if not exists idx_members_group_status ON members(group_id, status);
-create index if not exists idx_members_user_group ON members(user_id, group_id);
-create index if not exists idx_audit_logs_group_created ON audit_logs(group_id, created_at);
+-- indexes 
+create index if not exists idx_session_expire on session (expire);
+create index if not exists idx_members_last_checked on members (last_checked);
+create index if not exists idx_members_status on members (status);
+create index if not exists idx_audit_logs_created_at on  audit_logs (created_at);
+create index if not exists idx_nft_rules_group_id on nft_rules (group_id);
+create index if not exists idx_members_user_id on members(user_id);
+create index if not exists idx_pending_verifications_expires on  pending_verifications (expires_at);
+create index if not exists idx_members_group_status on  members(group_id, status);
+create index if not exists idx_members_user_group on  members(user_id, group_id);
+create index if not exists idx_audit_logs_group_created on audit_logs(group_id, created_at);
