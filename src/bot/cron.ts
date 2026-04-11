@@ -4,7 +4,7 @@ import { query } from "../shared/db.js";
 import { getVerifiedWallet, checkNftOwnership } from "../shared/enjin.js";
 
 export function startCronJobs(bot: Bot) {
-  //poll pending QR verifications every 15 seconds
+  // Poll pending QR verifications every 15 seconds
   cron.schedule("*/15 * * * * *", async () => {
     try {
       await pollPendingVerifications(bot);
@@ -13,7 +13,6 @@ export function startCronJobs(bot: Bot) {
     }
   });
 
-  //recheck verified user nft ownership every 10 minutes
   cron.schedule("*/10 * * * *", async () => {
     console.log("[CRON] Running NFT ownership re-check...");
     try {
@@ -23,7 +22,6 @@ export function startCronJobs(bot: Bot) {
     }
   });
 
-  //kick expired pending members each hour
   cron.schedule("0 * * * *", async () => {
     console.log("[CRON] Checking for expired pending members...");
     try {
@@ -33,12 +31,13 @@ export function startCronJobs(bot: Bot) {
     }
   });
 
-  console.log(
-    "[CRON] Jobs scheduled: verify-poll (*/15s), re-check (*/10min), kick-expired (hourly)",
-  );
+  console.log("[CRON] Jobs scheduled: verify-poll (*/15s), re-check (*/10min), kick-expired (hourly)");
 }
 
 async function pollPendingVerifications(bot: Bot) {
+  // Clean up expired verifications
+  await query(`DELETE FROM pending_verifications WHERE expires_at <= now()`);
+
   // Get all non-expired pending verifications
   const pending = await query(
     `SELECT pv.id, pv.verification_id, pv.telegram_chat_id, pv.user_id,
@@ -61,10 +60,8 @@ async function pollPendingVerifications(bot: Bot) {
     );
 
     if (existing.rows.length > 0) {
-      await bot.api.sendMessage(
-        parseInt(row.telegram_chat_id),
-        "This wallet is already linked to another Telegram account.",
-      );
+      await bot.api.sendMessage(parseInt(row.telegram_chat_id),
+        "This wallet is already linked to another Telegram account.");
       await query(`DELETE FROM pending_verifications WHERE id = $1`, [row.id]);
       continue;
     }
@@ -135,24 +132,13 @@ async function pollPendingVerifications(bot: Bot) {
           );
           await query(
             `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-            [
-              group.groupId,
-              row.user_id,
-              "USER_VERIFIED",
-              JSON.stringify({
-                walletAddress,
-                collectionId: rule.collectionId,
-                tokenId: rule.tokenId,
-              }),
-            ],
+            [group.groupId, row.user_id, "USER_VERIFIED",
+             JSON.stringify({ walletAddress, collectionId: rule.collectionId, tokenId: rule.tokenId })],
           );
 
           // Unrestrict user in the group
           try {
-            const groupResult = await query(
-              `SELECT telegram_id FROM groups WHERE id = $1`,
-              [group.groupId],
-            );
+            const groupResult = await query(`SELECT telegram_id FROM groups WHERE id = $1`, [group.groupId]);
             if (groupResult.rows.length > 0) {
               await bot.api.restrictChatMember(
                 parseInt(groupResult.rows[0].telegram_id),
@@ -176,10 +162,7 @@ async function pollPendingVerifications(bot: Bot) {
               );
             }
           } catch (err) {
-            console.error(
-              `[CRON] Failed to unrestrict user ${row.user_telegram_id}:`,
-              err,
-            );
+            console.error(`[CRON] Failed to unrestrict user ${row.user_telegram_id}:`, err);
           }
 
           break;
@@ -198,19 +181,11 @@ async function pollPendingVerifications(bot: Bot) {
     }
 
     try {
-      await bot.api.sendMessage(parseInt(row.telegram_chat_id), message, {
-        parse_mode: "Markdown",
-      });
+      await bot.api.sendMessage(parseInt(row.telegram_chat_id), message, { parse_mode: "Markdown" });
     } catch (err) {
-      console.error(
-        `[CRON] Failed to notify user ${row.user_telegram_id}:`,
-        err,
-      );
+      console.error(`[CRON] Failed to notify user ${row.user_telegram_id}:`, err);
     }
   }
-
-  // Clean up expired verifications
-  await query(`DELETE FROM pending_verifications WHERE expires_at <= now()`);
 }
 
 async function recheckVerifiedMembers(bot: Bot) {
@@ -226,24 +201,16 @@ async function recheckVerifiedMembers(bot: Bot) {
      WHERE g.is_active = true AND u.wallet_address IS NOT NULL`,
   );
 
-  const memberChecks = new Map<
-    string,
-    {
-      memberId: string;
-      groupId: string;
-      groupTelegramId: string;
-      userId: string;
-      userTelegramId: string;
-      walletAddress: string;
-      lastChecked: Date | null;
-      rules: Array<{
-        collectionId: string;
-        tokenId: string | null;
-        minBalance: number;
-        checkInterval: number;
-      }>;
-    }
-  >();
+  const memberChecks = new Map<string, {
+    memberId: string;
+    groupId: string;
+    groupTelegramId: string;
+    userId: string;
+    userTelegramId: string;
+    walletAddress: string;
+    lastChecked: Date | null;
+    rules: Array<{ collectionId: string; tokenId: string | null; minBalance: number; checkInterval: number }>;
+  }>();
 
   for (const row of result.rows) {
     if (!memberChecks.has(row.member_id)) {
@@ -272,8 +239,7 @@ async function recheckVerifiedMembers(bot: Bot) {
   for (const [, member] of memberChecks) {
     const minInterval = Math.min(...member.rules.map((r) => r.checkInterval));
     if (member.lastChecked) {
-      const secondsSinceCheck =
-        (Date.now() - new Date(member.lastChecked).getTime()) / 1000;
+      const secondsSinceCheck = (Date.now() - new Date(member.lastChecked).getTime()) / 1000;
       if (secondsSinceCheck < minInterval) continue;
     }
 
@@ -281,58 +247,33 @@ async function recheckVerifiedMembers(bot: Bot) {
     let stillHoldsNft = false;
 
     for (const rule of member.rules) {
-      if (
-        await checkNftOwnership(
-          member.walletAddress,
-          rule.collectionId,
-          rule.tokenId,
-          rule.minBalance,
-        )
-      ) {
+      if (await checkNftOwnership(member.walletAddress, rule.collectionId, rule.tokenId, rule.minBalance)) {
         stillHoldsNft = true;
         break;
       }
     }
 
     if (stillHoldsNft) {
-      await query(`UPDATE members SET last_checked = now() WHERE id = $1`, [
-        member.memberId,
-      ]);
+      await query(`UPDATE members SET last_checked = now() WHERE id = $1`, [member.memberId]);
     } else {
       try {
-        await bot.api.banChatMember(
-          parseInt(member.groupTelegramId),
-          parseInt(member.userTelegramId),
-        );
-        await bot.api.unbanChatMember(
-          parseInt(member.groupTelegramId),
-          parseInt(member.userTelegramId),
-        );
+        await bot.api.banChatMember(parseInt(member.groupTelegramId), parseInt(member.userTelegramId));
+        await bot.api.unbanChatMember(parseInt(member.groupTelegramId), parseInt(member.userTelegramId));
       } catch (err) {
         console.error(`[CRON] Failed to kick ${member.userTelegramId}:`, err);
       }
 
-      await query(
-        `UPDATE members SET status = 'KICKED', last_checked = now() WHERE id = $1`,
-        [member.memberId],
-      );
+      await query(`UPDATE members SET status = 'KICKED', last_checked = now() WHERE id = $1`, [member.memberId]);
       await query(
         `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-        [
-          member.groupId,
-          member.userId,
-          "USER_KICKED",
-          JSON.stringify({ reason: "NFT no longer held" }),
-        ],
+        [member.groupId, member.userId, "USER_KICKED", JSON.stringify({ reason: "NFT no longer held" })],
       );
 
       kickedCount++;
     }
   }
 
-  console.log(
-    `[CRON] Re-check done. Checked: ${checkedCount}, Kicked: ${kickedCount}`,
-  );
+  console.log(`[CRON] Re-check done. Checked: ${checkedCount}, Kicked: ${kickedCount}`);
 }
 
 async function kickExpiredPendingMembers(bot: Bot) {
@@ -357,40 +298,21 @@ async function kickExpiredPendingMembers(bot: Bot) {
     const isBan = previousKicks >= 4;
 
     try {
-      await bot.api.banChatMember(
-        parseInt(row.group_telegram_id),
-        parseInt(row.user_telegram_id),
-      );
+      await bot.api.banChatMember(parseInt(row.group_telegram_id), parseInt(row.user_telegram_id));
       if (!isBan) {
-        await bot.api.unbanChatMember(
-          parseInt(row.group_telegram_id),
-          parseInt(row.user_telegram_id),
-        );
+        await bot.api.unbanChatMember(parseInt(row.group_telegram_id), parseInt(row.user_telegram_id));
       }
     } catch (err) {
-      console.error(
-        `[CRON] Failed to ${isBan ? "ban" : "kick"} expired member:`,
-        err,
-      );
+      console.error(`[CRON] Failed to ${isBan ? "ban" : "kick"} expired member:`, err);
     }
 
     await query(`UPDATE members SET status = 'KICKED' WHERE id = $1`, [row.id]);
     await query(
       `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-      [
-        row.group_id,
-        row.user_id,
-        isBan ? "USER_BANNED" : "USER_KICKED",
-        JSON.stringify({
-          reason: isBan
-            ? "Banned after 5 failed verifications"
-            : "Verification timeout (1h)",
-        }),
-      ],
+      [row.group_id, row.user_id, isBan ? "USER_BANNED" : "USER_KICKED",
+       JSON.stringify({ reason: isBan ? "Banned after 5 failed verifications" : "Verification timeout (1h)" })],
     );
 
-    console.log(
-      `[CRON] ${isBan ? "Banned" : "Kicked"} expired: ${row.user_telegram_id} from ${row.group_telegram_id}`,
-    );
+    console.log(`[CRON] ${isBan ? "Banned" : "Kicked"} expired: ${row.user_telegram_id} from ${row.group_telegram_id}`);
   }
 }

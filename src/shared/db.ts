@@ -1,4 +1,6 @@
 import { Pool, QueryResultRow, QueryResult } from "pg";
+import dotenv from "dotenv";
+dotenv.config();
 
 //connection to db
 const pool = new Pool({
