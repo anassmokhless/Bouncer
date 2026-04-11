@@ -1,0 +1,17 @@
+services:
+  dashboard:
+    build: .
+    container_name: tgbot-dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+
+  bot:
+    build: .
+    container_name: tgbot-bot
+    restart: unless-stopped
+    command: ["node", "dist/bot/index.js"]
+    env_file:
+      - .env
