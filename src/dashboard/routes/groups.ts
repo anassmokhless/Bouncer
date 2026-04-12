@@ -78,13 +78,20 @@ router.post("/:id/recheck", async (req: Request, res: Response) => {
     return;
   }
 
+  const groupResult = await query(`SELECT telegram_id FROM groups WHERE id = $1`, [groupId]);
+  if (groupResult.rows.length === 0) {
+    res.status(404).json({ error: "Group not found" });
+    return;
+  }
+  const groupTelegramId = groupResult.rows[0].telegram_id;
+
   const rules = await query(
     `SELECT * FROM nft_rules WHERE group_id = $1 AND is_active = true`,
     [groupId],
   );
 
   const members = await query(
-    `SELECT m.id, u.wallet_address, u.id AS user_id
+    `SELECT m.id, u.wallet_address, u.id AS user_id, u.telegram_id AS user_telegram_id
      FROM members m JOIN users u ON u.id = m.user_id
      WHERE m.group_id = $1 AND m.status = 'VERIFIED'`,
     [groupId],
@@ -106,6 +113,21 @@ router.post("/:id/recheck", async (req: Request, res: Response) => {
     }
 
     if (!stillHolds) {
+      // Kick from Telegram
+      try {
+        await fetch(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/banChatMember`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: parseInt(groupTelegramId),
+            user_id: parseInt(member.user_telegram_id),
+            until_date: Math.floor(Date.now() / 1000) + 40,
+          }),
+        });
+      } catch (err) {
+        console.error(`[DASHBOARD] Failed to kick ${member.user_telegram_id}:`, err);
+      }
+
       await query(`UPDATE members SET status = 'KICKED', last_checked = now() WHERE id = $1`, [member.id]);
       await query(
         `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
