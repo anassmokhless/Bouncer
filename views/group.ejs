@@ -58,6 +58,7 @@
                 <td class="px-5 py-3">
                   <form action="/dashboard/<%= group.id %>/rules/<%= rule.id %>/delete" method="POST"
                         onsubmit="return confirm('Remove this rule?')">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                     <button type="submit" class="text-red-400 hover:text-red-300 text-xs transition-colors">Remove</button>
                   </form>
                 </td>
@@ -71,6 +72,7 @@
     <!-- Add rule form -->
     <div class="px-5 py-4 border-t border-slate-800">
       <form action="/dashboard/<%= group.id %>/rules" method="POST" class="flex flex-wrap items-end gap-3">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
         <div>
           <label class="block text-xs text-gray-500 mb-1">Collection ID *</label>
           <input type="text" name="collectionId" required placeholder="e.g. 36105"
@@ -143,7 +145,11 @@ async function recheckAll() {
   btn.textContent = 'Checking...';
   result.textContent = '';
   try {
-    const res = await fetch('/dashboard/<%= group.id %>/recheck', { method: 'POST' });
+    const res = await fetch('/dashboard/<%= group.id %>/recheck', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '<%= csrfToken %>' },
+      body: JSON.stringify({}),
+    });
     const data = await res.json();
     if (res.ok) {
       result.textContent = 'Checked ' + data.checked + ', kicked ' + data.kicked + '.';

@@ -4,6 +4,7 @@ import path from "path";
 dotenv.config({ path: path.resolve(import.meta.dirname, "../../.env") });
 
 import "../types.js";
+import crypto from "crypto";
 import express from "express";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
@@ -37,6 +38,23 @@ app.use(
     },
   }),
 );
+
+// CSRF protection
+app.use((req, res, next) => {
+  if (!req.session.csrfToken) {
+    req.session.csrfToken = crypto.randomBytes(32).toString("hex");
+  }
+  res.locals.csrfToken = req.session.csrfToken;
+
+  if (req.method === "POST") {
+    const token = req.body._csrf || req.headers["x-csrf-token"];
+    if (token !== req.session.csrfToken) {
+      res.status(403).send("Invalid CSRF token");
+      return;
+    }
+  }
+  next();
+});
 
 // Login page
 app.get("/login", (req, res) => {

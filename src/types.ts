@@ -8,5 +8,6 @@ declare module "express-session" {
       firstName: string | null;
       username: string | null;
     };
+    csrfToken: string;
   }
 }
