@@ -263,13 +263,9 @@ async function recheckVerifiedMembers(bot: Bot) {
       await query(`UPDATE members SET last_checked = now() WHERE id = $1`, [member.memberId]);
     } else {
       try {
-        await bot.api.banChatMember(parseInt(member.groupTelegramId), parseInt(member.userTelegramId));
-        try {
-          await bot.api.unbanChatMember(parseInt(member.groupTelegramId), parseInt(member.userTelegramId));
-        } catch {
-          // Retry once — if unban fails the user stays permanently banned
-          await bot.api.unbanChatMember(parseInt(member.groupTelegramId), parseInt(member.userTelegramId));
-        }
+        await bot.api.banChatMember(parseInt(member.groupTelegramId), parseInt(member.userTelegramId), {
+          until_date: Math.floor(Date.now() / 1000) + 40,
+        });
       } catch (err) {
         console.error(`[CRON] Failed to kick ${member.userTelegramId}:`, err);
       }
@@ -309,13 +305,12 @@ async function kickExpiredPendingMembers(bot: Bot) {
     const isBan = previousKicks >= 4;
 
     try {
-      await bot.api.banChatMember(parseInt(row.group_telegram_id), parseInt(row.user_telegram_id));
-      if (!isBan) {
-        try {
-          await bot.api.unbanChatMember(parseInt(row.group_telegram_id), parseInt(row.user_telegram_id));
-        } catch {
-          await bot.api.unbanChatMember(parseInt(row.group_telegram_id), parseInt(row.user_telegram_id));
-        }
+      if (isBan) {
+        await bot.api.banChatMember(parseInt(row.group_telegram_id), parseInt(row.user_telegram_id));
+      } else {
+        await bot.api.banChatMember(parseInt(row.group_telegram_id), parseInt(row.user_telegram_id), {
+          until_date: Math.floor(Date.now() / 1000) + 40,
+        });
       }
     } catch (err) {
       console.error(`[CRON] Failed to ${isBan ? "ban" : "kick"} expired member:`, err);
