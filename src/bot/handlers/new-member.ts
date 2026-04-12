@@ -110,7 +110,7 @@ export async function handleNewMembers(ctx: Context) {
           await query(
             `INSERT INTO members (group_id, user_id, status)
              VALUES ($1, $2, 'PENDING')
-             ON CONFLICT (group_id, user_id) DO UPDATE SET status = 'PENDING'`,
+             ON CONFLICT (group_id, user_id) DO UPDATE SET status = 'PENDING', created_at = now()`,
             [group.id, user.id],
           );
 

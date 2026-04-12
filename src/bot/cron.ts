@@ -1,6 +1,6 @@
 import cron from "node-cron";
 import { Bot } from "grammy";
-import { query } from "../shared/db.js";
+import { query, pool } from "../shared/db.js";
 import { getVerifiedWallet, checkNftOwnership } from "../shared/enjin.js";
 
 let isPolling = false;
@@ -72,19 +72,9 @@ async function pollPendingVerifications(bot: Bot) {
       continue;
     }
 
-    // Link wallet
-    await query(
-      `UPDATE users SET wallet_address = $1, is_verified = true, verified_at = now()
-       WHERE id = $2`,
-      [walletAddress, row.user_id],
-    );
-
-    // Remove pending verification
-    await query(`DELETE FROM pending_verifications WHERE id = $1`, [row.id]);
-
-    // Check NFT ownership for all group memberships
+    // Get memberships and rules (read-only, outside transaction)
     const memberships = await query(
-      `SELECT m.id AS member_id, m.group_id, g.title AS group_title,
+      `SELECT m.id AS member_id, m.group_id, g.title AS group_title, g.telegram_id AS group_telegram_id,
               r.collection_id, r.token_id, r.min_balance
        FROM members m
        JOIN groups g ON g.id = m.group_id
@@ -95,7 +85,7 @@ async function pollPendingVerifications(bot: Bot) {
 
     const groupMap = new Map<
       string,
-      { groupId: string; title: string; memberId: string; rules: any[] }
+      { groupId: string; title: string; memberId: string; groupTelegramId: string; rules: any[] }
     >();
 
     for (const m of memberships.rows) {
@@ -104,6 +94,7 @@ async function pollPendingVerifications(bot: Bot) {
           groupId: m.group_id,
           title: m.group_title,
           memberId: m.member_id,
+          groupTelegramId: m.group_telegram_id,
           rules: [],
         });
       }
@@ -116,7 +107,8 @@ async function pollPendingVerifications(bot: Bot) {
       }
     }
 
-    let verifiedGroupCount = 0;
+    // Check NFT ownership per group (external API calls, outside transaction)
+    const verifiedGroups: Array<{ groupId: string; memberId: string; groupTelegramId: string; collectionId: string; tokenId: string | null }> = [];
 
     for (const [, group] of groupMap) {
       if (group.rules.length === 0) continue;
@@ -130,56 +122,83 @@ async function pollPendingVerifications(bot: Bot) {
         );
 
         if (hasNft) {
-          verifiedGroupCount++;
-          await query(
-            `UPDATE members SET status = 'VERIFIED', last_checked = now()
-             WHERE id = $1`,
-            [group.memberId],
-          );
-          await query(
-            `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-            [group.groupId, row.user_id, "USER_VERIFIED",
-             JSON.stringify({ walletAddress, collectionId: rule.collectionId, tokenId: rule.tokenId })],
-          );
-
-          // Unrestrict user in the group
-          try {
-            const groupResult = await query(`SELECT telegram_id FROM groups WHERE id = $1`, [group.groupId]);
-            if (groupResult.rows.length > 0) {
-              await bot.api.restrictChatMember(
-                parseInt(groupResult.rows[0].telegram_id),
-                parseInt(row.user_telegram_id),
-                {
-                  can_send_messages: true,
-                  can_send_audios: true,
-                  can_send_documents: true,
-                  can_send_photos: true,
-                  can_send_videos: true,
-                  can_send_video_notes: true,
-                  can_send_voice_notes: true,
-                  can_send_polls: true,
-                  can_send_other_messages: true,
-                  can_add_web_page_previews: true,
-                  can_change_info: true,
-                  can_invite_users: true,
-                  can_pin_messages: true,
-                  can_manage_topics: true,
-                },
-              );
-            }
-          } catch (err) {
-            console.error(`[CRON] Failed to unrestrict user ${row.user_telegram_id}:`, err);
-          }
-
+          verifiedGroups.push({
+            groupId: group.groupId,
+            memberId: group.memberId,
+            groupTelegramId: group.groupTelegramId,
+            collectionId: rule.collectionId,
+            tokenId: rule.tokenId,
+          });
           break;
         }
       }
     }
 
+    // Transaction: link wallet + delete pending + update memberships + audit logs
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      await client.query(
+        `UPDATE users SET wallet_address = $1, is_verified = true, verified_at = now() WHERE id = $2`,
+        [walletAddress, row.user_id],
+      );
+
+      await client.query(`DELETE FROM pending_verifications WHERE id = $1`, [row.id]);
+
+      for (const vg of verifiedGroups) {
+        await client.query(
+          `UPDATE members SET status = 'VERIFIED', last_checked = now() WHERE id = $1`,
+          [vg.memberId],
+        );
+        await client.query(
+          `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
+          [vg.groupId, row.user_id, "USER_VERIFIED",
+           JSON.stringify({ walletAddress, collectionId: vg.collectionId, tokenId: vg.tokenId })],
+        );
+      }
+
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      console.error(`[CRON] Transaction failed for user ${row.user_telegram_id}:`, err);
+      continue;
+    } finally {
+      client.release();
+    }
+
+    // Unrestrict verified users in Telegram (outside transaction)
+    for (const vg of verifiedGroups) {
+      try {
+        await bot.api.restrictChatMember(
+          parseInt(vg.groupTelegramId),
+          parseInt(row.user_telegram_id),
+          {
+            can_send_messages: true,
+            can_send_audios: true,
+            can_send_documents: true,
+            can_send_photos: true,
+            can_send_videos: true,
+            can_send_video_notes: true,
+            can_send_voice_notes: true,
+            can_send_polls: true,
+            can_send_other_messages: true,
+            can_add_web_page_previews: true,
+            can_change_info: true,
+            can_invite_users: true,
+            can_pin_messages: true,
+            can_manage_topics: true,
+          },
+        );
+      } catch (err) {
+        console.error(`[CRON] Failed to unrestrict user ${row.user_telegram_id}:`, err);
+      }
+    }
+
     // Notify the user
     let message: string;
-    if (verifiedGroupCount > 0) {
-      message = `Wallet \`${walletAddress}\` verified! You have access to ${verifiedGroupCount} group(s).`;
+    if (verifiedGroups.length > 0) {
+      message = `Wallet \`${walletAddress}\` verified! You have access to ${verifiedGroups.length} group(s).`;
     } else if (groupMap.size === 0) {
       message = `Wallet \`${walletAddress}\` verified and linked!\n\nJoin an NFT-gated group and I'll automatically check your holdings.`;
     } else {
