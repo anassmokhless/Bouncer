@@ -3,13 +3,19 @@ import { Bot } from "grammy";
 import { query } from "../shared/db.js";
 import { getVerifiedWallet, checkNftOwnership } from "../shared/enjin.js";
 
+let isPolling = false;
+
 export function startCronJobs(bot: Bot) {
   // Poll pending QR verifications every 15 seconds
   cron.schedule("*/15 * * * * *", async () => {
+    if (isPolling) return;
+    isPolling = true;
     try {
       await pollPendingVerifications(bot);
     } catch (err) {
       console.error("[CRON] Verification poll failed:", err);
+    } finally {
+      isPolling = false;
     }
   });
 
@@ -258,7 +264,12 @@ async function recheckVerifiedMembers(bot: Bot) {
     } else {
       try {
         await bot.api.banChatMember(parseInt(member.groupTelegramId), parseInt(member.userTelegramId));
-        await bot.api.unbanChatMember(parseInt(member.groupTelegramId), parseInt(member.userTelegramId));
+        try {
+          await bot.api.unbanChatMember(parseInt(member.groupTelegramId), parseInt(member.userTelegramId));
+        } catch {
+          // Retry once — if unban fails the user stays permanently banned
+          await bot.api.unbanChatMember(parseInt(member.groupTelegramId), parseInt(member.userTelegramId));
+        }
       } catch (err) {
         console.error(`[CRON] Failed to kick ${member.userTelegramId}:`, err);
       }
@@ -300,7 +311,11 @@ async function kickExpiredPendingMembers(bot: Bot) {
     try {
       await bot.api.banChatMember(parseInt(row.group_telegram_id), parseInt(row.user_telegram_id));
       if (!isBan) {
-        await bot.api.unbanChatMember(parseInt(row.group_telegram_id), parseInt(row.user_telegram_id));
+        try {
+          await bot.api.unbanChatMember(parseInt(row.group_telegram_id), parseInt(row.user_telegram_id));
+        } catch {
+          await bot.api.unbanChatMember(parseInt(row.group_telegram_id), parseInt(row.user_telegram_id));
+        }
       }
     } catch (err) {
       console.error(`[CRON] Failed to ${isBan ? "ban" : "kick"} expired member:`, err);

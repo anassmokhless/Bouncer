@@ -4,6 +4,11 @@ import { requestAccountVerification } from "../../shared/enjin.js";
 import { getOrCreateUser } from "../helpers.js";
 
 export async function verifyCommand(ctx: Context) {
+  if (ctx.chat?.type !== "private") {
+    await ctx.reply("Please DM me to verify your wallet.");
+    return;
+  }
+
   const from = ctx.from;
   if (!from) return;
 

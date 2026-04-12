@@ -90,6 +90,15 @@ export async function getVerifiedWallet(
   }
 }
 
+//bouncer pass check (early access)
+export async function hasBouncerPass(walletAddress: string): Promise<boolean> {
+  const collectionId = process.env.BOUNCER_COLLECTION_ID;
+  if (!collectionId) return true; // no collection set = early access disabled
+
+  const tokenId = process.env.BOUNCER_TOKEN_ID || null;
+  return checkNftOwnership(walletAddress, collectionId, tokenId, 1);
+}
+
 //ntf ownership verification
 export async function checkNftOwnership(
   walletAddress: string,

@@ -1,20 +1,35 @@
 import { Bot, Context } from "grammy";
 import { query } from "../../shared/db.js";
-import { getOrCreateGroup, getOrCreateUser } from "../helpers.js";
+import { getOrCreateGroup, getOrCreateUser, checkBouncerAccess } from "../helpers.js";
 //for group admins
 
-//check if user is groupadmin
-async function isGroupAdmin(ctx: Context): Promise<boolean> {
+//check if user is group admin + holds bouncer pass
+async function isAuthorizedAdmin(ctx: Context): Promise<boolean> {
   if (!ctx.chat || !ctx.from) return false;
-  if (ctx.chat.type === "private") return false;
+  if (ctx.chat.type === "private") {
+    await ctx.reply("This command only works in groups.");
+    return false;
+  }
 
   try {
     const member = await ctx.api.getChatMember(ctx.chat.id, ctx.from.id);
-    return member.status === "administrator" || member.status === "creator";
+    if (member.status !== "administrator" && member.status !== "creator") {
+      await ctx.reply("Only group admins can use this command.");
+      return false;
+    }
   } catch (e) {
     console.error(e);
     return false;
   }
+
+  if (!(await checkBouncerAccess(ctx.from.id.toString()))) {
+    await ctx.reply(
+      "You need a Bouncer Pass NFT to use admin commands. DM me /verify to link your wallet.",
+    );
+    return false;
+  }
+
+  return true;
 }
 
 //admin register/update and return
@@ -38,14 +53,7 @@ async function syncAdmin(ctx: Context, groupId: string) {
 //setup all admin commands
 export function registerSetupCommands(bot: Bot) {
   bot.command("setup", async (ctx) => {
-    if (ctx.chat?.type === "private") {
-      await ctx.reply("This command only works in groups.");
-      return;
-    }
-    if (!(await isGroupAdmin(ctx))) {
-      await ctx.reply("Only group admins can configure the bot.");
-      return;
-    }
+    if (!(await isAuthorizedAdmin(ctx))) return;
 
     await ctx.reply(
       [
@@ -67,11 +75,7 @@ export function registerSetupCommands(bot: Bot) {
   });
 
   bot.command("addrule", async (ctx) => {
-    if (ctx.chat?.type === "private") return;
-    if (!(await isGroupAdmin(ctx))) {
-      await ctx.reply("Only group admins can add rules.");
-      return;
-    }
+    if (!(await isAuthorizedAdmin(ctx))) return;
 
     const text = ctx.message?.text || "";
     const parts = text.split(" ").slice(1);
@@ -151,11 +155,7 @@ export function registerSetupCommands(bot: Bot) {
   });
 
   bot.command("removerule", async (ctx) => {
-    if (ctx.chat?.type === "private") return;
-    if (!(await isGroupAdmin(ctx))) {
-      await ctx.reply("Only group admins can remove rules.");
-      return;
-    }
+    if (!(await isAuthorizedAdmin(ctx))) return;
 
     const text = ctx.message?.text || "";
     const ruleNumber = parseInt(text.split(" ")[1]);
@@ -207,11 +207,7 @@ export function registerSetupCommands(bot: Bot) {
   });
 
   bot.command("setinterval", async (ctx) => {
-    if (ctx.chat?.type === "private") return;
-    if (!(await isGroupAdmin(ctx))) {
-      await ctx.reply("Only group admins can change settings.");
-      return;
-    }
+    if (!(await isAuthorizedAdmin(ctx))) return;
 
     const text = ctx.message?.text || "";
     const input = text.split(" ")[1];

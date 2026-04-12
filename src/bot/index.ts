@@ -10,6 +10,7 @@ import { unlinkCommand } from "./commands/unlink.js";
 import { statusCommand } from "./commands/status.js";
 import { registerSetupCommands } from "./commands/setup.js";
 import { handleNewMembers } from "./handlers/new-member.js";
+import { handleBotAdded } from "./handlers/bot-added.js";
 import { startCronJobs } from "./cron.js";
 
 const bot = new Bot(process.env.BOT_TOKEN!);
@@ -32,6 +33,7 @@ bot.command("verify", verifyCommand);
 bot.command("unlink", unlinkCommand);
 bot.command("status", statusCommand);
 registerSetupCommands(bot);
+bot.on("my_chat_member", handleBotAdded);
 bot.on(":new_chat_members", handleNewMembers);
 
 bot.catch((err) => {
@@ -45,13 +47,12 @@ bot.catch((err) => {
 });
 
 // Graceful shutdown
-function shutdown() {
+async function shutdown() {
   console.log("[BOT] Shutting down...");
-  bot.stop();
-  pool.end().then(() => {
-    console.log("[BOT] Stopped.");
-    process.exit(0);
-  });
+  await bot.stop();
+  await pool.end();
+  console.log("[BOT] Stopped.");
+  process.exit(0);
 }
 
 process.on("SIGINT", shutdown);
@@ -62,7 +63,7 @@ async function main() {
   startCronJobs(bot);
   await bot.start({
     onStart: () => console.log("[BOT] Running! Listening for messages..."),
-    allowed_updates: ["message", "chat_member", "callback_query"],
+    allowed_updates: ["message", "chat_member", "my_chat_member", "callback_query"],
   });
 }
 
