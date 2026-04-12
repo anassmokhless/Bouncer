@@ -1,4 +1,4 @@
-<%- include('partials/head', { title: group.title + ' — NFT Gate' }) %>
+<%- include('partials/head', { title: group.title + ' — Bouncer' }) %>
 <%- include('partials/nav') %>
 
 <div class="max-w-6xl mx-auto px-4 py-8">
@@ -35,7 +35,7 @@
   <div class="bg-slate-900 border border-slate-800 rounded-xl mb-8">
     <div class="px-5 py-4 border-b border-slate-800"><h2 class="font-semibold text-cyan-400">NFT Rules</h2></div>
     <% if (rules.length === 0) { %>
-      <p class="p-5 text-gray-500">No rules configured. Use /addrule in the Telegram group.</p>
+      <p class="p-5 text-gray-500">No rules configured yet.</p>
     <% } else { %>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
@@ -45,6 +45,7 @@
               <th class="px-5 py-3 font-medium text-gray-400">Token ID</th>
               <th class="px-5 py-3 font-medium text-gray-400">Min Balance</th>
               <th class="px-5 py-3 font-medium text-gray-400">Check Interval</th>
+              <th class="px-5 py-3"></th>
             </tr>
           </thead>
           <tbody>
@@ -54,12 +55,43 @@
                 <td class="px-5 py-3"><%= rule.token_id || 'Any' %></td>
                 <td class="px-5 py-3"><%= rule.min_balance %></td>
                 <td class="px-5 py-3"><%= rule.check_interval_seconds / 3600 %>h</td>
+                <td class="px-5 py-3">
+                  <form action="/dashboard/<%= group.id %>/rules/<%= rule.id %>/delete" method="POST"
+                        onsubmit="return confirm('Remove this rule?')">
+                    <button type="submit" class="text-red-400 hover:text-red-300 text-xs transition-colors">Remove</button>
+                  </form>
+                </td>
               </tr>
             <% }) %>
           </tbody>
         </table>
       </div>
     <% } %>
+
+    <!-- Add rule form -->
+    <div class="px-5 py-4 border-t border-slate-800">
+      <form action="/dashboard/<%= group.id %>/rules" method="POST" class="flex flex-wrap items-end gap-3">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Collection ID *</label>
+          <input type="text" name="collectionId" required placeholder="e.g. 36105"
+                 class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-cyan-500 w-36">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Token ID</label>
+          <input type="text" name="tokenId" placeholder="Any"
+                 class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-cyan-500 w-28">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Min Balance</label>
+          <input type="number" name="minBalance" value="1" min="1"
+                 class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-cyan-500 w-20">
+        </div>
+        <button type="submit"
+                class="bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-cyan-500 transition-colors">
+          Add Rule
+        </button>
+      </form>
+    </div>
   </div>
 
   <div class="bg-slate-900 border border-slate-800 rounded-xl">

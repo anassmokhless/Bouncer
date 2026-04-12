@@ -120,4 +120,73 @@ router.post("/:id/recheck", async (req: Request, res: Response) => {
   res.json({ checked, kicked });
 });
 
+// Add rule
+router.post("/:id/rules", async (req: Request, res: Response) => {
+  const user = req.session.user!;
+  const groupId = req.params.id;
+
+  const adminCheck = await query(
+    `SELECT 1 FROM group_admins ga JOIN users u ON u.id = ga.user_id
+     WHERE ga.group_id = $1 AND u.telegram_id = $2`,
+    [groupId, user.telegramId],
+  );
+
+  if (adminCheck.rows.length === 0) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const { collectionId, tokenId, minBalance } = req.body;
+
+  if (!collectionId) {
+    res.status(400).json({ error: "Collection ID is required" });
+    return;
+  }
+
+  await query(
+    `INSERT INTO nft_rules (group_id, collection_id, token_id, min_balance) VALUES ($1, $2, $3, $4)`,
+    [groupId, collectionId, tokenId || null, parseInt(minBalance) || 1],
+  );
+
+  // Audit log
+  const adminUser = await query(`SELECT id FROM users WHERE telegram_id = $1`, [user.telegramId]);
+  await query(
+    `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
+    [groupId, adminUser.rows[0].id, "RULE_ADDED", JSON.stringify({ collectionId, tokenId: tokenId || null, minBalance: parseInt(minBalance) || 1 })],
+  );
+
+  res.redirect(`/dashboard/${groupId}`);
+});
+
+// Delete rule
+router.post("/:id/rules/:ruleId/delete", async (req: Request, res: Response) => {
+  const user = req.session.user!;
+  const { id: groupId, ruleId } = req.params;
+
+  const adminCheck = await query(
+    `SELECT 1 FROM group_admins ga JOIN users u ON u.id = ga.user_id
+     WHERE ga.group_id = $1 AND u.telegram_id = $2`,
+    [groupId, user.telegramId],
+  );
+
+  if (adminCheck.rows.length === 0) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  await query(
+    `UPDATE nft_rules SET is_active = false WHERE id = $1 AND group_id = $2`,
+    [ruleId, groupId],
+  );
+
+  // Audit log
+  const adminUser = await query(`SELECT id FROM users WHERE telegram_id = $1`, [user.telegramId]);
+  await query(
+    `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
+    [groupId, adminUser.rows[0].id, "RULE_REMOVED", JSON.stringify({ ruleId })],
+  );
+
+  res.redirect(`/dashboard/${groupId}`);
+});
+
 export default router;

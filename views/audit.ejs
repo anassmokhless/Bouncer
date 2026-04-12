@@ -1,4 +1,4 @@
-<%- include('partials/head', { title: 'Audit Logs — NFT Gate' }) %>
+<%- include('partials/head', { title: 'Audit Logs — Bouncer' }) %>
 <%- include('partials/nav') %>
 
 <div class="max-w-6xl mx-auto px-4 py-8">
@@ -66,7 +66,20 @@
                   </span>
                 </td>
                 <td class="px-5 py-3 text-gray-300"><%= log.user_first_name || log.user_username || 'System' %></td>
-                <td class="px-5 py-3 text-xs text-gray-500 max-w-xs truncate"><%= log.details ? JSON.stringify(log.details) : '—' %></td>
+                <td class="px-5 py-3 text-xs text-gray-500">
+                  <% if (log.details && Object.keys(log.details).length > 0) { %>
+                    <div class="space-y-1">
+                      <% Object.entries(log.details).forEach(([key, value]) => { %>
+                        <div>
+                          <span class="text-gray-500"><%= key %>:</span>
+                          <span class="text-gray-300 font-mono ml-1"><%= value != null ? value : 'Any' %></span>
+                        </div>
+                      <% }) %>
+                    </div>
+                  <% } else { %>
+                    <span class="text-gray-600">—</span>
+                  <% } %>
+                </td>
               </tr>
             <% }) %>
           </tbody>
