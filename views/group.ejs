@@ -1,0 +1,131 @@
+<%- include('partials/head', { title: group.title + ' — NFT Gate' }) %>
+<%- include('partials/nav') %>
+
+<div class="max-w-6xl mx-auto px-4 py-8">
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <a href="/dashboard" class="text-sm text-gray-500 hover:text-cyan-400 transition-colors">&larr; Back to Groups</a>
+      <h1 class="text-2xl font-bold mt-1"><%= group.title %></h1>
+      <p class="text-sm text-gray-500">Telegram ID: <%= group.telegram_id %></p>
+    </div>
+    <div class="flex items-center gap-3">
+      <span id="recheck-result" class="text-sm text-gray-400"></span>
+      <button onclick="recheckAll()" id="recheck-btn"
+              class="bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-cyan-500 transition-colors">
+        Re-check NFTs
+      </button>
+    </div>
+  </div>
+
+  <div class="grid gap-4 md:grid-cols-3 mb-8">
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+      <p class="text-sm text-gray-500">Verified Members</p>
+      <p class="text-2xl font-bold text-emerald-400"><%= members.filter(m => m.status === 'VERIFIED').length %></p>
+    </div>
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+      <p class="text-sm text-gray-500">Pending Members</p>
+      <p class="text-2xl font-bold text-amber-400"><%= members.filter(m => m.status === 'PENDING').length %></p>
+    </div>
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+      <p class="text-sm text-gray-500">Active Rules</p>
+      <p class="text-2xl font-bold text-purple-400"><%= rules.length %></p>
+    </div>
+  </div>
+
+  <div class="bg-slate-900 border border-slate-800 rounded-xl mb-8">
+    <div class="px-5 py-4 border-b border-slate-800"><h2 class="font-semibold text-cyan-400">NFT Rules</h2></div>
+    <% if (rules.length === 0) { %>
+      <p class="p-5 text-gray-500">No rules configured. Use /addrule in the Telegram group.</p>
+    <% } else { %>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-slate-800 text-left">
+              <th class="px-5 py-3 font-medium text-gray-400">Collection ID</th>
+              <th class="px-5 py-3 font-medium text-gray-400">Token ID</th>
+              <th class="px-5 py-3 font-medium text-gray-400">Min Balance</th>
+              <th class="px-5 py-3 font-medium text-gray-400">Check Interval</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% rules.forEach(rule => { %>
+              <tr class="border-b border-slate-800">
+                <td class="px-5 py-3 font-mono text-xs text-purple-300"><%= rule.collection_id %></td>
+                <td class="px-5 py-3"><%= rule.token_id || 'Any' %></td>
+                <td class="px-5 py-3"><%= rule.min_balance %></td>
+                <td class="px-5 py-3"><%= rule.check_interval_seconds / 3600 %>h</td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+  </div>
+
+  <div class="bg-slate-900 border border-slate-800 rounded-xl">
+    <div class="px-5 py-4 border-b border-slate-800"><h2 class="font-semibold text-cyan-400">Members (<%= members.length %>)</h2></div>
+    <% if (members.length === 0) { %>
+      <p class="p-5 text-gray-500">No members yet.</p>
+    <% } else { %>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-slate-800 text-left">
+              <th class="px-5 py-3 font-medium text-gray-400">User</th>
+              <th class="px-5 py-3 font-medium text-gray-400">Wallet</th>
+              <th class="px-5 py-3 font-medium text-gray-400">Status</th>
+              <th class="px-5 py-3 font-medium text-gray-400">Last Checked</th>
+              <th class="px-5 py-3 font-medium text-gray-400">Joined</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% const statusColors = { VERIFIED: 'bg-emerald-500/15 text-emerald-400', PENDING: 'bg-amber-500/15 text-amber-400', KICKED: 'bg-red-500/15 text-red-400', LEFT: 'bg-gray-500/15 text-gray-400' }; %>
+            <% members.forEach(member => { %>
+              <tr class="border-b border-slate-800">
+                <td class="px-5 py-3">
+                  <p class="font-medium text-gray-100"><%= member.first_name || member.username || 'Unknown' %></p>
+                  <% if (member.username) { %><p class="text-xs text-gray-500">@<%= member.username %></p><% } %>
+                </td>
+                <td class="px-5 py-3 font-mono text-xs text-purple-300"><%= member.wallet_address || 'Not linked' %></td>
+                <td class="px-5 py-3">
+                  <span class="<%= statusColors[member.status] || 'bg-gray-500/15 text-gray-400' %> text-xs px-2 py-1 rounded-full">
+                    <%= member.status %>
+                  </span>
+                </td>
+                <td class="px-5 py-3 text-gray-500"><%= member.last_checked ? new Date(member.last_checked).toLocaleString() : 'Never' %></td>
+                <td class="px-5 py-3 text-gray-500"><%= new Date(member.created_at).toLocaleString() %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+  </div>
+</div>
+
+<script>
+async function recheckAll() {
+  const btn = document.getElementById('recheck-btn');
+  const result = document.getElementById('recheck-result');
+  btn.disabled = true;
+  btn.textContent = 'Checking...';
+  result.textContent = '';
+  try {
+    const res = await fetch('/dashboard/<%= group.id %>/recheck', { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) {
+      result.textContent = 'Checked ' + data.checked + ', kicked ' + data.kicked + '.';
+      setTimeout(() => location.reload(), 2000);
+    } else {
+      result.textContent = data.error || 'Re-check failed';
+    }
+  } catch {
+    result.textContent = 'Network error';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Re-check NFTs';
+  }
+}
+</script>
+
+<%- include('partials/footer') %>

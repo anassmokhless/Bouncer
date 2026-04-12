@@ -1,0 +1,37 @@
+<%- include('partials/head', { title: 'Login — NFT Gate' }) %>
+
+<div class="flex items-center justify-center min-h-screen">
+  <div class="bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-8 w-full max-w-sm text-center">
+    <img src="/images/logo.jpg" alt="NFT Gate" class="w-20 h-20 mx-auto mb-4 rounded-xl">
+    <h1 class="text-xl font-bold text-cyan-400 mb-2">NFT Gate Admin</h1>
+    <p class="text-sm text-gray-400 mb-6">Sign in with your Telegram account to manage your groups.</p>
+
+    <div id="telegram-login" class="flex justify-center mb-4"></div>
+
+    <% if (process.env.NODE_ENV !== 'production') { %>
+      <hr class="my-4 border-slate-700">
+      <p class="text-xs text-gray-500 mb-2">Dev Login (development only)</p>
+      <form action="/auth/dev" method="get" class="flex gap-2">
+        <input type="text" name="telegramId" placeholder="Telegram ID"
+               class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-cyan-500">
+        <button type="submit"
+                class="bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-cyan-500 transition-colors">
+          Login
+        </button>
+      </form>
+    <% } %>
+  </div>
+</div>
+
+<script>
+  const script = document.createElement('script');
+  script.src = 'https://telegram.org/js/telegram-widget.js?22';
+  script.setAttribute('data-telegram-login', '<%= botUsername %>');
+  script.setAttribute('data-size', 'large');
+  script.setAttribute('data-auth-url', window.location.origin + '/auth/telegram/callback');
+  script.setAttribute('data-request-access', 'write');
+  script.async = true;
+  document.getElementById('telegram-login').appendChild(script);
+</script>
+
+<%- include('partials/footer') %>
