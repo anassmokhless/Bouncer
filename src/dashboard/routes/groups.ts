@@ -6,6 +6,15 @@ import { requireLogin } from "../middleware.js";
 const router = Router();
 router.use(requireLogin);
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+router.param("id", (req, res, next, value) => {
+  if (!UUID_RE.test(value)) {
+    res.status(404).send("Not found");
+    return;
+  }
+  next();
+});
+
 // Groups list
 router.get("/", async (req: Request, res: Response) => {
   const user = req.session.user!;
