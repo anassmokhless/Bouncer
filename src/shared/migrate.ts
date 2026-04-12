@@ -16,7 +16,7 @@ const filePath: string = path.resolve(
 //connection to db
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  ssl: true,
 });
 
 //actual migration function

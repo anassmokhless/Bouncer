@@ -20,7 +20,7 @@ export function verifyTelegramLogin(data: TelegramLoginData): boolean {
 
   const checkString = Object.keys(rest)
     .sort()
-    .filter((key) => rest[key as keyof typeof rest])
+    .filter((key) => rest[key as keyof typeof rest] !== undefined)
     .map((key) => `${key}=${rest[key as keyof typeof rest]}`)
     .join("\n");
 

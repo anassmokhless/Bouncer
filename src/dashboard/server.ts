@@ -3,6 +3,7 @@ import path from "path";
 
 dotenv.config({ path: path.resolve(import.meta.dirname, "../../.env") });
 
+import helmet from "helmet";
 import "../types.js";
 import crypto from "crypto";
 import express from "express";
@@ -20,6 +21,7 @@ app.set("trust proxy", 1);
 app.set("view engine", "ejs");
 app.set("views", path.resolve(import.meta.dirname, "../../views"));
 
+app.use(helmet());
 app.use(express.static(path.resolve(import.meta.dirname, "../../public")));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
