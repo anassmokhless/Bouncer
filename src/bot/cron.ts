@@ -50,7 +50,16 @@ export function startCronJobs(bot: Bot) {
     }
   });
 
-  console.log("[CRON] Jobs scheduled: verify-poll (*/15s), re-check (*/10min), kick-expired (hourly)");
+  // Check for groups where admin didn't verify in time — every minute
+  cron.schedule("* * * * *", async () => {
+    try {
+      await leaveUnverifiedGroups(bot);
+    } catch (err) {
+      console.error("[CRON] Leave unverified groups failed:", err);
+    }
+  });
+
+  console.log("[CRON] Jobs scheduled: verify-poll (*/15s), re-check (*/10min), kick-expired (hourly), admin-verify (*/1min)");
 }
 
 async function pollPendingVerifications(bot: Bot) {
@@ -326,7 +335,7 @@ async function kickExpiredPendingMembers(bot: Bot) {
      FROM members m
      JOIN groups g ON g.id = m.group_id
      JOIN users u ON u.id = m.user_id
-     WHERE m.status = 'PENDING' AND m.created_at < now() - interval '1 hour'`,
+     WHERE m.status = 'PENDING' AND m.verification_deadline IS NOT NULL AND m.verification_deadline < now()`,
   );
 
   for (const row of result.rows) {
@@ -374,4 +383,37 @@ async function kickExpiredPendingMembers(bot: Bot) {
 
     console.log(`[CRON] ${isBan ? "Banned" : "Kicked"} expired: ${row.user_telegram_id} from ${row.group_telegram_id}`);
   }
+}
+
+async function leaveUnverifiedGroups(bot: Bot) {
+  // Find groups where admin_verify_deadline has passed and admin still hasn't linked a wallet
+  const result = await query(
+    `SELECT g.id, g.telegram_id, g.admin_user_id
+     FROM groups g
+     JOIN users u ON u.id = g.admin_user_id
+     WHERE g.admin_verify_deadline IS NOT NULL
+       AND g.admin_verify_deadline < now()
+       AND u.wallet_address IS NULL`,
+  );
+
+  for (const row of result.rows) {
+    try {
+      await bot.api.sendMessage(parseInt(row.telegram_id), "Admin did not verify within 5 minutes. Leaving group.");
+      await bot.api.leaveChat(parseInt(row.telegram_id));
+    } catch (err) {
+      console.error(`[CRON] Failed to leave group ${row.telegram_id}:`, err);
+    }
+
+    await query(`DELETE FROM group_admins WHERE group_id = $1 AND user_id = $2`, [row.id, row.admin_user_id]);
+    await query(`DELETE FROM groups WHERE id = $1`, [row.id]);
+
+    console.log(`[CRON] Left group ${row.telegram_id} — admin did not verify in time`);
+  }
+
+  // Clear deadline for admins who verified in time
+  await query(
+    `UPDATE groups SET admin_verify_deadline = NULL, admin_user_id = NULL
+     WHERE admin_verify_deadline IS NOT NULL
+       AND admin_user_id IN (SELECT id FROM users WHERE wallet_address IS NOT NULL)`,
+  );
 }

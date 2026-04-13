@@ -23,6 +23,8 @@ create table if not exists groups(
     telegram_id text unique not null,
     title text not null,
     is_active boolean not null default true,
+    admin_verify_deadline timestamptz,
+    admin_user_id uuid,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
@@ -77,6 +79,7 @@ create table if not exists members(
     group_id uuid not null references groups(id) on delete cascade,
     user_id uuid not null references users(id) on delete cascade,
     status member_status not null default 'PENDING',
+    verification_deadline timestamptz,
     last_checked timestamptz,
     created_at  timestamptz not null default now(),
     updated_at timestamptz not null default now(),

@@ -199,8 +199,8 @@ router.post("/:id/rules", requireGroupAdmin, async (req: Request, res: Response)
     return;
   }
 
-  const intervalHours = parseInt(checkInterval) || 1;
-  const intervalSeconds = Math.max(intervalHours, 1) * 3600;
+  const intervalHours = Math.min(Math.max(parseInt(checkInterval) || 1, 1), 720);
+  const intervalSeconds = intervalHours * 3600;
 
   await query(
     `INSERT INTO nft_rules (group_id, collection_id, token_id, min_balance, check_interval_seconds) VALUES ($1, $2, $3, $4, $5)`,

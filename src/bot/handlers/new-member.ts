@@ -100,9 +100,9 @@ export async function handleNewMembers(ctx: Context) {
         // Not verified — set as pending
         if (!verified) {
           await query(
-            `INSERT INTO members (group_id, user_id, status)
-             VALUES ($1, $2, 'PENDING')
-             ON CONFLICT (group_id, user_id) DO UPDATE SET status = 'PENDING', created_at = now()`,
+            `INSERT INTO members (group_id, user_id, status, verification_deadline)
+             VALUES ($1, $2, 'PENDING', now() + interval '1 hour')
+             ON CONFLICT (group_id, user_id) DO UPDATE SET status = 'PENDING', verification_deadline = now() + interval '1 hour'`,
             [group.id, user.id],
           );
 

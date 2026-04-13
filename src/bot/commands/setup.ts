@@ -217,8 +217,18 @@ export function registerSetupCommands(bot: Bot) {
     const input = text.split(" ")[1];
     const hours = parseFloat(input);
 
-    if (!hours || hours < 1) {
-      await ctx.reply("Usage: /setinterval <hours>\nMinimum: 1 hour");
+    if (!hours || !isFinite(hours)) {
+      await ctx.reply("Usage: /setinterval <hours>\nExample: /setinterval 6");
+      return;
+    }
+
+    if (hours < 1) {
+      await ctx.reply("Minimum interval is 1 hour.");
+      return;
+    }
+
+    if (hours > 720) {
+      await ctx.reply("Maximum interval is 720 hours (30 days).");
       return;
     }
 

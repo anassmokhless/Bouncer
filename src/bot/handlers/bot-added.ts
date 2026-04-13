@@ -41,6 +41,12 @@ export async function handleBotAdded(ctx: Context) {
 
     // Check if admin has a linked wallet
     if (!user.wallet_address) {
+        // Store deadline in DB so the cron can enforce it even after a restart
+        await query(
+            `UPDATE groups SET admin_verify_deadline = now() + interval '5 minutes', admin_user_id = $1 WHERE id = $2`,
+            [user.id, group.id],
+        );
+
         await ctx.api.sendMessage(
             chatId,
             [
@@ -53,25 +59,6 @@ export async function handleBotAdded(ctx: Context) {
                 "You have 5 minutes to link your wallet or I'll leave this group.",
             ].join("\n"),
         );
-
-        // Check again after 5 minutes — leave if still not verified
-        setTimeout(async () => {
-            try {
-                const check = await query(
-                    `SELECT wallet_address FROM users WHERE telegram_id = $1`,
-                    [addedBy.id.toString()],
-                );
-                if (!check.rows[0]?.wallet_address) {
-                    await ctx.api.sendMessage(chatId, "Admin did not verify within 5 minutes. Leaving group.");
-                    await ctx.api.leaveChat(chatId);
-                    await query(`DELETE FROM group_admins WHERE group_id = $1 AND user_id = $2`, [group.id, user.id]);
-                    await query(`DELETE FROM groups WHERE id = $1`, [group.id]);
-                    console.log(`[BOT] Left group ${chatId} — admin did not verify in time`);
-                }
-            } catch (err) {
-                console.error("[BOT] Failed to check admin verification:", err);
-            }
-        }, 5 * 60 * 1000);
     } else {
         await ctx.api.sendMessage(
             chatId,

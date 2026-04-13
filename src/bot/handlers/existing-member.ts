@@ -123,11 +123,11 @@ export async function handleExistingMember(ctx: Context) {
     console.error("[BOT] Failed to restrict existing member:", err);
   }
 
-  // Set as pending — offset created_at so the 1-hour cron kicks after 24h total
+  // Set as pending with 24-hour deadline for existing members
   await query(
-    `INSERT INTO members (group_id, user_id, status, created_at)
-     VALUES ($1, $2, 'PENDING', now() + interval '23 hours')
-     ON CONFLICT (group_id, user_id) DO UPDATE SET status = 'PENDING', created_at = now() + interval '23 hours'`,
+    `INSERT INTO members (group_id, user_id, status, verification_deadline)
+     VALUES ($1, $2, 'PENDING', now() + interval '24 hours')
+     ON CONFLICT (group_id, user_id) DO UPDATE SET status = 'PENDING', verification_deadline = now() + interval '24 hours'`,
     [groupId, user.id],
   );
 
