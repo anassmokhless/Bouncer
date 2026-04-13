@@ -86,6 +86,12 @@ app.use("/auth", authRoutes);
 app.use("/dashboard/audit", auditRoutes);
 app.use("/dashboard", groupsRoutes);
 
+// Global error handler
+app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error("[DASHBOARD] Unhandled error:", err);
+  res.status(500).send("Something went wrong");
+});
+
 // Start
 const PORT = parseInt(process.env.PORT || "3000");
 const server = app.listen(PORT, "0.0.0.0", () => {

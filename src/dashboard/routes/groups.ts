@@ -14,6 +14,13 @@ router.param("id", (req, res, next, value) => {
   }
   next();
 });
+router.param("ruleId", (req, res, next, value) => {
+  if (!UUID_RE.test(value)) {
+    res.status(404).send("Not found");
+    return;
+  }
+  next();
+});
 
 // Groups list
 router.get("/", async (req: Request, res: Response) => {
@@ -87,52 +94,62 @@ router.post("/:id/recheck", requireGroupAdmin, async (req: Request, res: Respons
   let checked = 0;
   let kicked = 0;
 
-  for (const member of members.rows) {
-    if (!member.wallet_address) continue;
-    checked++;
+  const BATCH_SIZE = 5;
+  const walleted = members.rows.filter((m: { wallet_address: string | null }) => m.wallet_address);
 
-    let stillHolds = false;
-    let apiError = false;
-    for (const rule of rules.rows) {
-      const result = await checkNftOwnership(member.wallet_address, rule.collection_id, rule.token_id, rule.min_balance);
-      if (result === null) {
-        apiError = true;
-        break;
-      }
-      if (result) {
-        stillHolds = true;
-        break;
-      }
-    }
+  for (let i = 0; i < walleted.length; i += BATCH_SIZE) {
+    const batch = walleted.slice(i, i + BATCH_SIZE);
 
-    // API error — skip this member
-    if (apiError) continue;
+    const results = await Promise.all(batch.map(async (member: { id: string; wallet_address: string; user_id: string; user_telegram_id: string }) => {
+      checked++;
 
-    if (!stillHolds) {
-      // Kick from Telegram
-      try {
-        await fetch(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/banChatMember`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: parseInt(groupTelegramId),
-            user_id: parseInt(member.user_telegram_id),
-            until_date: Math.floor(Date.now() / 1000) + 40,
-          }),
-        });
-      } catch (err) {
-        console.error(`[DASHBOARD] Failed to kick ${member.user_telegram_id}:`, err);
+      let stillHolds = false;
+      let apiError = false;
+      for (const rule of rules.rows) {
+        const result = await checkNftOwnership(member.wallet_address, rule.collection_id, rule.token_id, rule.min_balance);
+        if (result === null) {
+          apiError = true;
+          break;
+        }
+        if (result) {
+          stillHolds = true;
+          break;
+        }
       }
 
-      await query(`UPDATE members SET status = 'KICKED', last_checked = now() WHERE id = $1`, [member.id]);
-      await query(
-        `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-        [groupId, member.user_id, "USER_KICKED_MANUAL", JSON.stringify({ triggeredBy: user.telegramId })],
-      );
-      kicked++;
-    } else {
-      await query(`UPDATE members SET last_checked = now() WHERE id = $1`, [member.id]);
-    }
+      if (apiError) return;
+
+      if (!stillHolds) {
+        let kickSuccess = false;
+        try {
+          const kickRes = await fetch(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/banChatMember`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: parseInt(groupTelegramId),
+              user_id: parseInt(member.user_telegram_id),
+              until_date: Math.floor(Date.now() / 1000) + 40,
+            }),
+          });
+          const kickData = await kickRes.json() as { ok: boolean };
+          kickSuccess = kickData.ok;
+          if (!kickSuccess) console.error(`[DASHBOARD] Telegram refused kick for ${member.user_telegram_id}:`, kickData);
+        } catch (err) {
+          console.error(`[DASHBOARD] Failed to kick ${member.user_telegram_id}:`, err);
+        }
+
+        if (kickSuccess) {
+          await query(`UPDATE members SET status = 'KICKED', last_checked = now() WHERE id = $1 AND status = 'VERIFIED'`, [member.id]);
+          await query(
+            `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
+            [groupId, member.user_id, "USER_KICKED_MANUAL", JSON.stringify({ triggeredBy: user.telegramId })],
+          );
+          kicked++;
+        }
+      } else {
+        await query(`UPDATE members SET last_checked = now() WHERE id = $1 AND status = 'VERIFIED'`, [member.id]);
+      }
+    }));
   }
 
   res.json({ checked, kicked });
@@ -156,10 +173,9 @@ router.post("/:id/rules", requireGroupAdmin, async (req: Request, res: Response)
   );
 
   // Audit log
-  const adminUser = await query(`SELECT id FROM users WHERE telegram_id = $1`, [user.telegramId]);
   await query(
     `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-    [groupId, adminUser.rows[0].id, "RULE_ADDED", JSON.stringify({ collectionId, tokenId: tokenId || null, minBalance: parseInt(minBalance) || 1 })],
+    [groupId, user.id, "RULE_ADDED", JSON.stringify({ collectionId, tokenId: tokenId || null, minBalance: parseInt(minBalance) || 1 })],
   );
 
   res.redirect(`/dashboard/${groupId}`);
@@ -176,10 +192,9 @@ router.post("/:id/rules/:ruleId/delete", requireGroupAdmin, async (req: Request,
   );
 
   // Audit log
-  const adminUser = await query(`SELECT id FROM users WHERE telegram_id = $1`, [user.telegramId]);
   await query(
     `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-    [groupId, adminUser.rows[0].id, "RULE_REMOVED", JSON.stringify({ ruleId })],
+    [groupId, user.id, "RULE_REMOVED", JSON.stringify({ ruleId })],
   );
 
   res.redirect(`/dashboard/${groupId}`);

@@ -29,7 +29,7 @@ export function verifyTelegramLogin(data: TelegramLoginData): boolean {
     .update(checkString)
     .digest("hex");
 
-  if (hmac !== hash) return false;
+  if (!crypto.timingSafeEqual(Buffer.from(hmac, "hex"), Buffer.from(hash, "hex"))) return false;
 
   const authDate = parseInt(data.auth_date);
   if (Date.now() / 1000 - authDate > 86400) return false;
