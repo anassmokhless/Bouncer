@@ -75,7 +75,7 @@ app.get("/login", (req, res) => {
     res.redirect("/dashboard");
     return;
   }
-  res.render("login", { botUsername: process.env.BOT_USERNAME });
+  res.render("login", { botUsername: process.env.BOT_USERNAME, isDev: process.env.NODE_ENV !== "production" });
 });
 
 // Root redirect

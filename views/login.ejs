@@ -8,7 +8,7 @@
 
     <div id="telegram-login" class="flex justify-center mb-4"></div>
 
-    <% if (process.env.NODE_ENV !== 'production') { %>
+    <% if (isDev) { %>
       <hr class="my-4 border-slate-700">
       <p class="text-xs text-gray-500 mb-2">Dev Login (development only)</p>
       <form action="/auth/dev" method="get" class="flex gap-2">
