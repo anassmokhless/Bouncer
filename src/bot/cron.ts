@@ -275,54 +275,63 @@ async function recheckVerifiedMembers(bot: Bot) {
   let checkedCount = 0;
   let kickedCount = 0;
 
-  for (const [, member] of memberChecks) {
+  // Filter to members due for a recheck
+  const dueMembers = Array.from(memberChecks.values()).filter((member) => {
     const minInterval = Math.min(...member.rules.map((r) => r.checkInterval));
     if (member.lastChecked) {
       const secondsSinceCheck = (Date.now() - new Date(member.lastChecked).getTime()) / 1000;
-      if (secondsSinceCheck < minInterval) continue;
+      if (secondsSinceCheck < minInterval) return false;
     }
+    return true;
+  });
 
-    checkedCount++;
-    let stillHoldsNft = false;
-    let apiError = false;
+  const BATCH_SIZE = 5;
+  for (let i = 0; i < dueMembers.length; i += BATCH_SIZE) {
+    const batch = dueMembers.slice(i, i + BATCH_SIZE);
 
-    for (const rule of member.rules) {
-      const result = await checkNftOwnership(member.walletAddress, rule.collectionId, rule.tokenId, rule.minBalance);
-      if (result === null) {
-        apiError = true;
-        break;
-      }
-      if (result) {
-        stillHoldsNft = true;
-        break;
-      }
-    }
+    await Promise.all(batch.map(async (member) => {
+      checkedCount++;
+      let stillHoldsNft = false;
+      let apiError = false;
 
-    // API error — skip this member, try again next cycle
-    if (apiError) continue;
-
-    if (stillHoldsNft) {
-      await query(`UPDATE members SET last_checked = now() WHERE id = $1`, [member.memberId]);
-    } else {
-      try {
-        await bot.api.banChatMember(parseInt(member.groupTelegramId), parseInt(member.userTelegramId), {
-          until_date: Math.floor(Date.now() / 1000) + 40,
-        });
-      } catch (err) {
-        console.error(`[CRON] Failed to kick ${member.userTelegramId}:`, err);
+      for (const rule of member.rules) {
+        const result = await checkNftOwnership(member.walletAddress, rule.collectionId, rule.tokenId, rule.minBalance);
+        if (result === null) {
+          apiError = true;
+          break;
+        }
+        if (result) {
+          stillHoldsNft = true;
+          break;
+        }
       }
 
-      await query(`UPDATE members SET status = 'KICKED', last_checked = now() WHERE id = $1`, [member.memberId]);
-      await query(
-        `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-        [member.groupId, member.userId, "USER_KICKED", JSON.stringify({ reason: "NFT no longer held" })],
-      );
+      // API error — skip this member, try again next cycle
+      if (apiError) return;
 
-      // Clear from existing-member cache so they get re-checked if they rejoin
-      removeCheckedPair(member.groupTelegramId, member.userTelegramId);
+      if (stillHoldsNft) {
+        await query(`UPDATE members SET last_checked = now() WHERE id = $1`, [member.memberId]);
+      } else {
+        try {
+          await bot.api.banChatMember(parseInt(member.groupTelegramId), parseInt(member.userTelegramId), {
+            until_date: Math.floor(Date.now() / 1000) + 40,
+          });
+        } catch (err) {
+          console.error(`[CRON] Failed to kick ${member.userTelegramId}:`, err);
+        }
 
-      kickedCount++;
-    }
+        await query(`UPDATE members SET status = 'KICKED', last_checked = now() WHERE id = $1`, [member.memberId]);
+        await query(
+          `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
+          [member.groupId, member.userId, "USER_KICKED", JSON.stringify({ reason: "NFT no longer held" })],
+        );
+
+        // Clear from existing-member cache so they get re-checked if they rejoin
+        removeCheckedPair(member.groupTelegramId, member.userTelegramId);
+
+        kickedCount++;
+      }
+    }));
   }
 
   console.log(`[CRON] Re-check done. Checked: ${checkedCount}, Kicked: ${kickedCount}`);
