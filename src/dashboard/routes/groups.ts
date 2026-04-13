@@ -1,7 +1,10 @@
 import { Router, Request, Response } from "express";
+import { Api } from "grammy";
 import { query } from "../../shared/db.js";
 import { checkNftOwnership } from "../../shared/enjin.js";
 import { requireLogin, requireGroupAdmin } from "../middleware.js";
+
+const api = new Api(process.env.BOT_TOKEN!);
 
 const router = Router();
 router.use(requireLogin);
@@ -159,18 +162,10 @@ router.post("/:id/recheck", requireGroupAdmin, async (req: Request, res: Respons
       if (!stillHolds) {
         let kickSuccess = false;
         try {
-          const kickRes = await fetch(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/banChatMember`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              chat_id: parseInt(groupTelegramId),
-              user_id: parseInt(member.user_telegram_id),
-              until_date: Math.floor(Date.now() / 1000) + 40,
-            }),
+          await api.banChatMember(parseInt(groupTelegramId), parseInt(member.user_telegram_id), {
+            until_date: Math.floor(Date.now() / 1000) + 40,
           });
-          const kickData = await kickRes.json() as { ok: boolean };
-          kickSuccess = kickData.ok;
-          if (!kickSuccess) console.error(`[DASHBOARD] Telegram refused kick for ${member.user_telegram_id}:`, kickData);
+          kickSuccess = true;
         } catch (err) {
           console.error(`[DASHBOARD] Failed to kick ${member.user_telegram_id}:`, err);
         }

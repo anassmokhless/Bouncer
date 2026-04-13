@@ -16,5 +16,5 @@
       }
     }
   },
-  "postCreateCommand": "npm install -g ts-node typescript nodemon prettier"
+  "postCreateCommand": "npm install -g typescript prettier"
 }

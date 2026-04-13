@@ -1,5 +1,5 @@
 import { Context } from "grammy";
-import { query } from "../../shared/db.js";
+import { query, pool } from "../../shared/db.js";
 
 export async function handleMemberLeft(ctx: Context) {
   const update = ctx.chatMember;
@@ -25,11 +25,21 @@ export async function handleMemberLeft(ctx: Context) {
 
   const member = result.rows[0];
 
-  await query(`UPDATE members SET status = 'LEFT' WHERE id = $1`, [member.id]);
-  await query(
-    `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-    [member.group_id, member.user_id, "USER_LEFT", JSON.stringify({ telegramId })],
-  );
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`UPDATE members SET status = 'LEFT' WHERE id = $1`, [member.id]);
+    await client.query(
+      `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
+      [member.group_id, member.user_id, "USER_LEFT", JSON.stringify({ telegramId })],
+    );
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 
   console.log(`[BOT] Member ${telegramId} left group ${chatId}`);
 }

@@ -346,12 +346,22 @@ async function kickExpiredPendingMembers(bot: Bot) {
       console.error(`[CRON] Failed to ${isBan ? "ban" : "kick"} expired member:`, err);
     }
 
-    await query(`UPDATE members SET status = 'KICKED' WHERE id = $1`, [row.id]);
-    await query(
-      `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-      [row.group_id, row.user_id, isBan ? "USER_BANNED" : "USER_KICKED",
-       JSON.stringify({ reason: isBan ? "Banned after 5 failed verifications" : "Verification timeout (1h)" })],
-    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`UPDATE members SET status = 'KICKED' WHERE id = $1`, [row.id]);
+      await client.query(
+        `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
+        [row.group_id, row.user_id, isBan ? "USER_BANNED" : "USER_KICKED",
+         JSON.stringify({ reason: isBan ? "Banned after 5 failed verifications" : "Verification timeout (1h)" })],
+      );
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      console.error("[CRON] Failed to update kick status:", err);
+    } finally {
+      client.release();
+    }
 
     console.log(`[CRON] ${isBan ? "Banned" : "Kicked"} expired: ${row.user_telegram_id} from ${row.group_telegram_id}`);
   }
