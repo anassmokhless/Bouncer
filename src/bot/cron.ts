@@ -131,6 +131,7 @@ async function pollPendingVerifications(bot: Bot) {
           rule.minBalance,
         );
 
+        if (hasNft === null) continue; // API error — skip this rule
         if (hasNft) {
           verifiedGroups.push({
             groupId: group.groupId,
@@ -186,18 +187,9 @@ async function pollPendingVerifications(bot: Bot) {
           {
             can_send_messages: true,
             can_send_audios: true,
-            can_send_documents: true,
             can_send_photos: true,
-            can_send_videos: true,
-            can_send_video_notes: true,
             can_send_voice_notes: true,
-            can_send_polls: true,
             can_send_other_messages: true,
-            can_add_web_page_previews: true,
-            can_change_info: true,
-            can_invite_users: true,
-            can_pin_messages: true,
-            can_manage_topics: true,
           },
         );
       } catch (err) {
@@ -280,13 +272,22 @@ async function recheckVerifiedMembers(bot: Bot) {
 
     checkedCount++;
     let stillHoldsNft = false;
+    let apiError = false;
 
     for (const rule of member.rules) {
-      if (await checkNftOwnership(member.walletAddress, rule.collectionId, rule.tokenId, rule.minBalance)) {
+      const result = await checkNftOwnership(member.walletAddress, rule.collectionId, rule.tokenId, rule.minBalance);
+      if (result === null) {
+        apiError = true;
+        break;
+      }
+      if (result) {
         stillHoldsNft = true;
         break;
       }
     }
+
+    // API error — skip this member, try again next cycle
+    if (apiError) continue;
 
     if (stillHoldsNft) {
       await query(`UPDATE members SET last_checked = now() WHERE id = $1`, [member.memberId]);

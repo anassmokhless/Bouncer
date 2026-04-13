@@ -90,16 +90,17 @@ export async function hasBouncerPass(walletAddress: string): Promise<boolean> {
   if (!collectionId) return true; // no collection set = early access disabled
 
   const tokenId = process.env.BOUNCER_TOKEN_ID || null;
-  return checkNftOwnership(walletAddress, collectionId, tokenId, 1);
+  const result = await checkNftOwnership(walletAddress, collectionId, tokenId, 1);
+  return result === true; // null (API error) treated as false for bouncer pass
 }
 
-//ntf ownership verification
+//ntf ownership verification — returns null on API error (skip, don't kick)
 export async function checkNftOwnership(
   walletAddress: string,
   collectionId: string,
   tokenId: string | null,
   minBalance: number = 1,
-): Promise<boolean> {
+): Promise<boolean | null> {
   try {
     if (tokenId) {
       // Specific token: use bulkFilter for exact match
@@ -156,6 +157,6 @@ export async function checkNftOwnership(
     }
   } catch (error) {
     console.error("[ENJIN] NFT check failed:", error);
-    return false;
+    return null;
   }
 }

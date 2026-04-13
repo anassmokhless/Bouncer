@@ -92,12 +92,21 @@ router.post("/:id/recheck", requireGroupAdmin, async (req: Request, res: Respons
     checked++;
 
     let stillHolds = false;
+    let apiError = false;
     for (const rule of rules.rows) {
-      if (await checkNftOwnership(member.wallet_address, rule.collection_id, rule.token_id, rule.min_balance)) {
+      const result = await checkNftOwnership(member.wallet_address, rule.collection_id, rule.token_id, rule.min_balance);
+      if (result === null) {
+        apiError = true;
+        break;
+      }
+      if (result) {
         stillHolds = true;
         break;
       }
     }
+
+    // API error — skip this member
+    if (apiError) continue;
 
     if (!stillHolds) {
       // Kick from Telegram
