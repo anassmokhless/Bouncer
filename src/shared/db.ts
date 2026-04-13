@@ -8,6 +8,8 @@ const pool = new Pool({
   ssl: true,
 });
 
+pool.on("error", (err) => console.error("[DB] Pool error:", err));
+
 //helper function for queries
 export async function query<T extends QueryResultRow = any>(
   text: string,
