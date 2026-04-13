@@ -320,11 +320,21 @@ async function recheckVerifiedMembers(bot: Bot) {
           console.error(`[CRON] Failed to kick ${member.userTelegramId}:`, err);
         }
 
-        await query(`UPDATE members SET status = 'KICKED', last_checked = now() WHERE id = $1`, [member.memberId]);
-        await query(
-          `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-          [member.groupId, member.userId, "USER_KICKED", JSON.stringify({ reason: "NFT no longer held" })],
-        );
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query(`UPDATE members SET status = 'KICKED', last_checked = now() WHERE id = $1`, [member.memberId]);
+          await client.query(
+            `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
+            [member.groupId, member.userId, "USER_KICKED", JSON.stringify({ reason: "NFT no longer held" })],
+          );
+          await client.query("COMMIT");
+        } catch (err) {
+          await client.query("ROLLBACK");
+          console.error(`[CRON] Failed to update kick status for ${member.userTelegramId}:`, err);
+        } finally {
+          client.release();
+        }
 
         // Clear from existing-member cache so they get re-checked if they rejoin
         removeCheckedPair(member.groupTelegramId, member.userTelegramId);
