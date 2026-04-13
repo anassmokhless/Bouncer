@@ -2,6 +2,7 @@ import cron from "node-cron";
 import { Bot } from "grammy";
 import { query, pool } from "../shared/db.js";
 import { getVerifiedWallet, checkNftOwnership } from "../shared/enjin.js";
+import { removeCheckedPair, pruneCheckedPairs } from "./handlers/existing-member.js";
 
 let isPolling = false;
 let isRechecking = false;
@@ -39,6 +40,8 @@ export function startCronJobs(bot: Bot) {
     isKicking = true;
     console.log("[CRON] Checking for expired pending members...");
     try {
+      // Prune expired entries from existing-member TTL cache
+      pruneCheckedPairs();
       await kickExpiredPendingMembers(bot);
     } catch (err) {
       console.error("[CRON] Kick expired failed:", err);
@@ -306,6 +309,9 @@ async function recheckVerifiedMembers(bot: Bot) {
         [member.groupId, member.userId, "USER_KICKED", JSON.stringify({ reason: "NFT no longer held" })],
       );
 
+      // Clear from existing-member cache so they get re-checked if they rejoin
+      removeCheckedPair(member.groupTelegramId, member.userTelegramId);
+
       kickedCount++;
     }
   }
@@ -362,6 +368,9 @@ async function kickExpiredPendingMembers(bot: Bot) {
     } finally {
       client.release();
     }
+
+    // Clear from existing-member cache so they get re-checked if they rejoin
+    removeCheckedPair(row.group_telegram_id, row.user_telegram_id);
 
     console.log(`[CRON] ${isBan ? "Banned" : "Kicked"} expired: ${row.user_telegram_id} from ${row.group_telegram_id}`);
   }

@@ -1,7 +1,8 @@
 import { Context } from "grammy";
-import { query } from "../../shared/db.js";
+import { query, pool } from "../../shared/db.js";
 
 export async function unlinkCommand(ctx: Context) {
+  if (ctx.chat?.type !== "private") return;
   const from = ctx.from;
   if (!from) return;
 
@@ -19,17 +20,28 @@ export async function unlinkCommand(ctx: Context) {
 
   const user = result.rows[0];
 
-  await query(
-    `UPDATE users SET wallet_address = NULL, is_verified = false, verified_at = NULL
-     WHERE id = $1`,
-    [user.id],
-  );
-
-  await query(
-    `UPDATE members SET status = 'PENDING'
-     WHERE user_id = $1 AND status = 'VERIFIED'`,
-    [user.id],
-  );
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `UPDATE users SET wallet_address = NULL, is_verified = false, verified_at = NULL
+       WHERE id = $1`,
+      [user.id],
+    );
+    await client.query(
+      `UPDATE members SET status = 'PENDING'
+       WHERE user_id = $1 AND status = 'VERIFIED'`,
+      [user.id],
+    );
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("[BOT] Failed to unlink wallet:", err);
+    await ctx.reply("Something went wrong. Please try again.");
+    return;
+  } finally {
+    client.release();
+  }
 
   await ctx.reply(
     "Wallet unlinked. Your group memberships have been reset to pending.\n\nUse /verify to link a new wallet.",

@@ -12,9 +12,23 @@ import { registerSetupCommands } from "./commands/setup.js";
 import { handleNewMembers } from "./handlers/new-member.js";
 import { handleBotAdded } from "./handlers/bot-added.js";
 import { handleMemberLeft } from "./handlers/member-left.js";
+import { handleExistingMember } from "./handlers/existing-member.js";
 import { startCronJobs } from "./cron.js";
 
 const bot = new Bot(process.env.BOT_TOKEN!);
+
+// Block non-admin commands in groups — only DMs and group admins can use commands
+bot.use(async (ctx, next) => {
+  if (ctx.message?.text?.startsWith("/") && ctx.chat && ctx.chat.type !== "private") {
+    try {
+      const member = await ctx.api.getChatMember(ctx.chat.id, ctx.from!.id);
+      if (member.status !== "administrator" && member.status !== "creator") return;
+    } catch {
+      return;
+    }
+  }
+  await next();
+});
 
 bot.command("start", async (ctx) => {
   await ctx.reply(
@@ -37,6 +51,7 @@ registerSetupCommands(bot);
 bot.on("my_chat_member", handleBotAdded);
 bot.on("chat_member", handleMemberLeft);
 bot.on(":new_chat_members", handleNewMembers);
+bot.on("message", handleExistingMember);
 
 bot.catch((err) => {
   const ctx = err.ctx;

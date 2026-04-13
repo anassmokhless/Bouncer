@@ -2,6 +2,7 @@ import { Context } from "grammy";
 import { query } from "../../shared/db.js";
 
 export async function statusCommand(ctx: Context) {
+  if (ctx.chat?.type !== "private") return;
   const from = ctx.from;
   if (!from) return;
 

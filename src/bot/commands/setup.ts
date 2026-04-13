@@ -14,7 +14,6 @@ async function isAuthorizedAdmin(ctx: Context): Promise<boolean> {
   try {
     const member = await ctx.api.getChatMember(ctx.chat.id, ctx.from.id);
     if (member.status !== "administrator" && member.status !== "creator") {
-      await ctx.reply("Only group admins can use this command.");
       return false;
     }
   } catch (e) {
@@ -125,6 +124,11 @@ export function registerSetupCommands(bot: Bot) {
         `  Collection: ${collectionId}`,
         `  Token: ${tokenId || "Any"}`,
         `  Min balance: ${minBalance}`,
+        "",
+        "Existing members: DM me to verify your wallet.",
+        `Start here: https://t.me/${process.env.BOT_USERNAME}?start=verify`,
+        "",
+        "Unverified members will be removed during the next check.",
       ].join("\n"),
     );
   });

@@ -1,5 +1,6 @@
 import { Context } from "grammy";
 import { query, pool } from "../../shared/db.js";
+import { removeCheckedPair } from "./existing-member.js";
 
 export async function handleMemberLeft(ctx: Context) {
   const update = ctx.chatMember;
@@ -40,6 +41,9 @@ export async function handleMemberLeft(ctx: Context) {
   } finally {
     client.release();
   }
+
+  // Clear from existing-member cache so they get re-checked if they rejoin
+  removeCheckedPair(chatId, telegramId);
 
   console.log(`[BOT] Member ${telegramId} left group ${chatId}`);
 }
