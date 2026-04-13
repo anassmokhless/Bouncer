@@ -57,14 +57,51 @@ router.get("/:id", requireGroupAdmin, async (req: Request, res: Response) => {
     [groupId],
   );
 
+  const statsResult = await query(
+    `SELECT status, COUNT(*)::int AS count FROM members WHERE group_id = $1 GROUP BY status`,
+    [groupId],
+  );
+  const stats: Record<string, number> = {};
+  for (const row of statsResult.rows) stats[row.status] = row.count;
+
+  const page = Math.max(1, parseInt(req.query.page as string) || 1);
+  const pageSize = 25;
+  const search = ((req.query.search as string) || "").trim();
+  const offset = (page - 1) * pageSize;
+
+  const countParams: (string | string)[] = [groupId];
+  let countWhere = `WHERE m.group_id = $1`;
+  if (search) {
+    countParams.push(`%${search}%`);
+    countWhere += ` AND (u.username ILIKE $2 OR u.first_name ILIKE $2)`;
+  }
+
+  const totalResult = await query(
+    `SELECT COUNT(*) FROM members m JOIN users u ON u.id = m.user_id ${countWhere}`,
+    countParams,
+  );
+  const totalMembers = parseInt(totalResult.rows[0].count);
+  const totalPages = Math.max(1, Math.ceil(totalMembers / pageSize));
+
+  const memberParams: (string | number)[] = search
+    ? [groupId, `%${search}%`, pageSize, offset]
+    : [groupId, pageSize, offset];
+  const memberWhere = search
+    ? `WHERE m.group_id = $1 AND (u.username ILIKE $2 OR u.first_name ILIKE $2)`
+    : `WHERE m.group_id = $1`;
+  const memberLimit = search ? `LIMIT $3 OFFSET $4` : `LIMIT $2 OFFSET $3`;
+
   const members = await query(
     `SELECT m.*, u.telegram_id AS user_telegram_id, u.username, u.first_name, u.wallet_address
      FROM members m JOIN users u ON u.id = m.user_id
-     WHERE m.group_id = $1 ORDER BY m.created_at DESC`,
-    [groupId],
+     ${memberWhere} ORDER BY m.created_at DESC ${memberLimit}`,
+    memberParams,
   );
 
-  res.render("group", { user, group: groupResult.rows[0], rules: rules.rows, members: members.rows });
+  res.render("group", {
+    user, group: groupResult.rows[0], rules: rules.rows, members: members.rows,
+    page, totalPages, totalMembers, search, stats,
+  });
 });
 
 // Manual re-check
@@ -160,22 +197,25 @@ router.post("/:id/rules", requireGroupAdmin, async (req: Request, res: Response)
   const user = req.session.user!;
   const groupId = req.params.id;
 
-  const { collectionId, tokenId, minBalance } = req.body;
+  const { collectionId, tokenId, minBalance, checkInterval } = req.body;
 
   if (!collectionId) {
     res.status(400).json({ error: "Collection ID is required" });
     return;
   }
 
+  const intervalHours = parseInt(checkInterval) || 1;
+  const intervalSeconds = Math.max(intervalHours, 1) * 3600;
+
   await query(
-    `INSERT INTO nft_rules (group_id, collection_id, token_id, min_balance) VALUES ($1, $2, $3, $4)`,
-    [groupId, collectionId, tokenId || null, parseInt(minBalance) || 1],
+    `INSERT INTO nft_rules (group_id, collection_id, token_id, min_balance, check_interval_seconds) VALUES ($1, $2, $3, $4, $5)`,
+    [groupId, collectionId, tokenId || null, parseInt(minBalance) || 1, intervalSeconds],
   );
 
   // Audit log
   await query(
     `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-    [groupId, user.id, "RULE_ADDED", JSON.stringify({ collectionId, tokenId: tokenId || null, minBalance: parseInt(minBalance) || 1 })],
+    [groupId, user.id, "RULE_ADDED", JSON.stringify({ collectionId, tokenId: tokenId || null, minBalance: parseInt(minBalance) || 1, checkIntervalHours: intervalHours })],
   );
 
   res.redirect(`/dashboard/${groupId}`);

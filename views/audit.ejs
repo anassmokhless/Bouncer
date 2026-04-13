@@ -44,8 +44,19 @@
   </details>
 
   <div class="bg-slate-900 border border-slate-800 rounded-xl">
+    <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between flex-wrap gap-3">
+      <h2 class="font-semibold text-cyan-400">Logs (<%= totalLogs %>)</h2>
+      <form method="GET" action="/dashboard/audit" class="flex items-center gap-2">
+        <input type="text" name="search" value="<%= search %>" placeholder="Search username..."
+               class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-cyan-500 w-48">
+        <button type="submit" class="bg-slate-700 text-gray-300 px-3 py-1.5 rounded-lg text-sm hover:bg-slate-600 transition-colors">Search</button>
+        <% if (search) { %>
+          <a href="/dashboard/audit" class="text-xs text-gray-500 hover:text-gray-300 transition-colors">Clear</a>
+        <% } %>
+      </form>
+    </div>
     <% if (logs.length === 0) { %>
-      <p class="p-6 text-gray-500">No audit logs yet.</p>
+      <p class="p-6 text-gray-500"><%= search ? 'No logs found.' : 'No audit logs yet.' %></p>
     <% } else { %>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
@@ -62,7 +73,7 @@
             <% const actionColors = { USER_VERIFIED: 'bg-emerald-500/15 text-emerald-400', USER_AUTO_VERIFIED: 'bg-emerald-500/15 text-emerald-400', USER_KICKED: 'bg-red-500/15 text-red-400', USER_KICKED_MANUAL: 'bg-red-500/15 text-red-400', USER_LEFT: 'bg-gray-500/15 text-gray-400', RULE_ADDED: 'bg-cyan-500/15 text-cyan-400', RULE_REMOVED: 'bg-gray-500/15 text-gray-400' }; %>
             <% logs.forEach(log => { %>
               <tr class="border-b border-slate-800">
-                <td class="px-5 py-3 text-gray-500 whitespace-nowrap"><%= new Date(log.created_at).toLocaleString() %></td>
+                <td class="px-5 py-3 text-gray-500 whitespace-nowrap" data-date="<%= log.created_at %>"></td>
                 <td class="px-5 py-3 font-medium text-gray-100"><%= log.group_title %></td>
                 <td class="px-5 py-3">
                   <span class="<%= actionColors[log.action] || 'bg-gray-500/15 text-gray-400' %> text-xs px-2 py-1 rounded-full">
@@ -90,7 +101,29 @@
         </table>
       </div>
     <% } %>
+    <% if (totalPages > 1) { %>
+      <div class="px-5 py-4 border-t border-slate-800 flex items-center justify-between">
+        <p class="text-sm text-gray-500">Page <%= page %> of <%= totalPages %></p>
+        <div class="flex gap-2">
+          <% if (page > 1) { %>
+            <a href="/dashboard/audit?page=<%= page - 1 %><%= search ? '&search=' + encodeURIComponent(search) : '' %>"
+               class="bg-slate-800 text-gray-300 px-3 py-1.5 rounded-lg text-sm hover:bg-slate-700 transition-colors">&larr; Prev</a>
+          <% } %>
+          <% if (page < totalPages) { %>
+            <a href="/dashboard/audit?page=<%= page + 1 %><%= search ? '&search=' + encodeURIComponent(search) : '' %>"
+               class="bg-slate-800 text-gray-300 px-3 py-1.5 rounded-lg text-sm hover:bg-slate-700 transition-colors">Next &rarr;</a>
+          <% } %>
+        </div>
+      </div>
+    <% } %>
   </div>
 </div>
+
+<script>
+document.querySelectorAll('[data-date]').forEach(el => {
+  const d = el.dataset.date;
+  el.textContent = d ? new Date(d).toLocaleString() : 'Never';
+});
+</script>
 
 <%- include('partials/footer') %>

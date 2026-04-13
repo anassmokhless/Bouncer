@@ -1,5 +1,5 @@
 // Seed script to insert fake demo data for dashboard preview
-// Run: npx tsx scripts/seed-demo.ts <your-telegram-id>
+// Run: npx tsx testscripts/seed-demo.ts <your-telegram-id>
 
 import dotenv from "dotenv";
 import path from "path";
@@ -9,13 +9,13 @@ dotenv.config({ path: path.resolve(import.meta.dirname, "../.env") });
 
 const telegramId = process.argv[2];
 if (!telegramId) {
-  console.error("Usage: npx tsx scripts/seed-demo.ts <your-telegram-id>");
+  console.error("Usage: npx tsx testscripts/seed-demo.ts <your-telegram-id>");
   process.exit(1);
 }
 
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  ssl: true,
 });
 
 async function seed() {
@@ -62,14 +62,54 @@ async function seed() {
 
     // Create fake users
     const fakeUsers = [
-      { telegramId: "900001", username: "alice_nft", firstName: "Alice", wallet: "efTkR8y4n3V1D5pEuAJMbe1RsNqxXg7ueJMVHxqsT4pJ9R4gZ" },
-      { telegramId: "900002", username: "bob_hodl", firstName: "Bob", wallet: "efUqJ7s2M4nKdR6vCx8pGw3QaTfYbE9hNzWmLkXs5D2rV8Fg4" },
-      { telegramId: "900003", username: "carol_web3", firstName: "Carol", wallet: "efWpL5t8K2mHfS9uBv7qEx4RbNgYc6jPwAzXnJkD3F1sT7Uh9" },
-      { telegramId: "900004", username: "dave_enjin", firstName: "Dave", wallet: null },
-      { telegramId: "900005", username: null, firstName: "Eve", wallet: "efXrM6u9L3nJgT1vCw8rFy5ScPhZd7kQxBaYoKlE4G2uV9Wi0" },
-      { telegramId: "900006", username: "frank_defi", firstName: "Frank", wallet: "efYsN7v0M4oKhU2wDx9sGz6TdQiAe8lRyBbZpLmF5H3vW0Xj1" },
-      { telegramId: "900007", username: "grace_nft", firstName: "Grace", wallet: null },
-      { telegramId: "900008", username: "hank_crypto", firstName: "Hank", wallet: "efZtO8w1N5pLiV3xEy0tHA7UeRjBf9mSzCcAqMnG6I4wX1Yk2" },
+      {
+        telegramId: "900001",
+        username: "alice_nft",
+        firstName: "Alice",
+        wallet: "efTkR8y4n3V1D5pEuAJMbe1RsNqxXg7ueJMVHxqsT4pJ9R4gZ",
+      },
+      {
+        telegramId: "900002",
+        username: "bob_hodl",
+        firstName: "Bob",
+        wallet: "efUqJ7s2M4nKdR6vCx8pGw3QaTfYbE9hNzWmLkXs5D2rV8Fg4",
+      },
+      {
+        telegramId: "900003",
+        username: "carol_web3",
+        firstName: "Carol",
+        wallet: "efWpL5t8K2mHfS9uBv7qEx4RbNgYc6jPwAzXnJkD3F1sT7Uh9",
+      },
+      {
+        telegramId: "900004",
+        username: "dave_enjin",
+        firstName: "Dave",
+        wallet: null,
+      },
+      {
+        telegramId: "900005",
+        username: null,
+        firstName: "Eve",
+        wallet: "efXrM6u9L3nJgT1vCw8rFy5ScPhZd7kQxBaYoKlE4G2uV9Wi0",
+      },
+      {
+        telegramId: "900006",
+        username: "frank_defi",
+        firstName: "Frank",
+        wallet: "efYsN7v0M4oKhU2wDx9sGz6TdQiAe8lRyBbZpLmF5H3vW0Xj1",
+      },
+      {
+        telegramId: "900007",
+        username: "grace_nft",
+        firstName: "Grace",
+        wallet: null,
+      },
+      {
+        telegramId: "900008",
+        username: "hank_crypto",
+        firstName: "Hank",
+        wallet: "efZtO8w1N5pLiV3xEy0tHA7UeRjBf9mSzCcAqMnG6I4wX1Yk2",
+      },
     ];
 
     const userIds: string[] = [];
@@ -80,7 +120,14 @@ async function seed() {
          VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (telegram_id) DO UPDATE SET username = EXCLUDED.username
          RETURNING id`,
-        [u.telegramId, u.username, u.firstName, u.wallet, !!u.wallet, u.wallet ? new Date(Date.now() - Math.random() * 7 * 86400000) : null],
+        [
+          u.telegramId,
+          u.username,
+          u.firstName,
+          u.wallet,
+          !!u.wallet,
+          u.wallet ? new Date(Date.now() - Math.random() * 7 * 86400000) : null,
+        ],
       );
       userIds.push(result.rows[0].id);
     }
@@ -103,20 +150,65 @@ async function seed() {
     // Add members to groups with mixed statuses
     const memberships = [
       // Group 0: Enjin Holders VIP
-      { groupIdx: 0, userIdx: 0, status: "VERIFIED", lastChecked: new Date(Date.now() - 3600000) },
-      { groupIdx: 0, userIdx: 1, status: "VERIFIED", lastChecked: new Date(Date.now() - 7200000) },
+      {
+        groupIdx: 0,
+        userIdx: 0,
+        status: "VERIFIED",
+        lastChecked: new Date(Date.now() - 3600000),
+      },
+      {
+        groupIdx: 0,
+        userIdx: 1,
+        status: "VERIFIED",
+        lastChecked: new Date(Date.now() - 7200000),
+      },
       { groupIdx: 0, userIdx: 2, status: "PENDING", lastChecked: null },
       { groupIdx: 0, userIdx: 3, status: "PENDING", lastChecked: null },
-      { groupIdx: 0, userIdx: 4, status: "KICKED", lastChecked: new Date(Date.now() - 86400000) },
+      {
+        groupIdx: 0,
+        userIdx: 4,
+        status: "KICKED",
+        lastChecked: new Date(Date.now() - 86400000),
+      },
       // Group 1: NFT Collectors Lounge
-      { groupIdx: 1, userIdx: 0, status: "VERIFIED", lastChecked: new Date(Date.now() - 1800000) },
-      { groupIdx: 1, userIdx: 5, status: "VERIFIED", lastChecked: new Date(Date.now() - 5400000) },
+      {
+        groupIdx: 1,
+        userIdx: 0,
+        status: "VERIFIED",
+        lastChecked: new Date(Date.now() - 1800000),
+      },
+      {
+        groupIdx: 1,
+        userIdx: 5,
+        status: "VERIFIED",
+        lastChecked: new Date(Date.now() - 5400000),
+      },
       { groupIdx: 1, userIdx: 6, status: "PENDING", lastChecked: null },
-      { groupIdx: 1, userIdx: 7, status: "VERIFIED", lastChecked: new Date(Date.now() - 10800000) },
+      {
+        groupIdx: 1,
+        userIdx: 7,
+        status: "VERIFIED",
+        lastChecked: new Date(Date.now() - 10800000),
+      },
       // Group 2: Bouncer Beta Testers
-      { groupIdx: 2, userIdx: 1, status: "VERIFIED", lastChecked: new Date(Date.now() - 600000) },
-      { groupIdx: 2, userIdx: 2, status: "VERIFIED", lastChecked: new Date(Date.now() - 900000) },
-      { groupIdx: 2, userIdx: 4, status: "LEFT", lastChecked: new Date(Date.now() - 172800000) },
+      {
+        groupIdx: 2,
+        userIdx: 1,
+        status: "VERIFIED",
+        lastChecked: new Date(Date.now() - 600000),
+      },
+      {
+        groupIdx: 2,
+        userIdx: 2,
+        status: "VERIFIED",
+        lastChecked: new Date(Date.now() - 900000),
+      },
+      {
+        groupIdx: 2,
+        userIdx: 4,
+        status: "LEFT",
+        lastChecked: new Date(Date.now() - 172800000),
+      },
     ];
 
     for (const m of memberships) {
@@ -130,15 +222,85 @@ async function seed() {
 
     // Add some audit logs
     const actions = [
-      { groupIdx: 0, userIdx: 0, action: "USER_VERIFIED", details: { walletAddress: fakeUsers[0].wallet, collectionId: "36105", tokenId: "0" }, ago: 6 * 3600000 },
-      { groupIdx: 0, userIdx: 1, action: "USER_VERIFIED", details: { walletAddress: fakeUsers[1].wallet, collectionId: "36105", tokenId: "0" }, ago: 5 * 3600000 },
-      { groupIdx: 0, userIdx: 4, action: "USER_KICKED", details: { reason: "NFT no longer held" }, ago: 86400000 },
-      { groupIdx: 1, userIdx: 0, action: "USER_AUTO_VERIFIED", details: { collectionId: "40200" }, ago: 2 * 3600000 },
-      { groupIdx: 1, userIdx: 5, action: "USER_VERIFIED", details: { walletAddress: fakeUsers[5].wallet, collectionId: "40200", tokenId: null }, ago: 4 * 3600000 },
-      { groupIdx: 0, userIdx: null, action: "RULE_ADDED", details: { collectionId: "36105", tokenId: "0", minBalance: 1 }, ago: 24 * 3600000 },
-      { groupIdx: 1, userIdx: null, action: "RULE_ADDED", details: { collectionId: "40200", tokenId: null, minBalance: 1 }, ago: 20 * 3600000 },
-      { groupIdx: 2, userIdx: 1, action: "USER_VERIFIED", details: { walletAddress: fakeUsers[1].wallet, collectionId: "50100", tokenId: "5" }, ago: 3600000 },
-      { groupIdx: 2, userIdx: 4, action: "USER_KICKED", details: { reason: "Verification timeout (1h)" }, ago: 172800000 },
+      {
+        groupIdx: 0,
+        userIdx: 0,
+        action: "USER_VERIFIED",
+        details: {
+          walletAddress: fakeUsers[0].wallet,
+          collectionId: "36105",
+          tokenId: "0",
+        },
+        ago: 6 * 3600000,
+      },
+      {
+        groupIdx: 0,
+        userIdx: 1,
+        action: "USER_VERIFIED",
+        details: {
+          walletAddress: fakeUsers[1].wallet,
+          collectionId: "36105",
+          tokenId: "0",
+        },
+        ago: 5 * 3600000,
+      },
+      {
+        groupIdx: 0,
+        userIdx: 4,
+        action: "USER_KICKED",
+        details: { reason: "NFT no longer held" },
+        ago: 86400000,
+      },
+      {
+        groupIdx: 1,
+        userIdx: 0,
+        action: "USER_AUTO_VERIFIED",
+        details: { collectionId: "40200" },
+        ago: 2 * 3600000,
+      },
+      {
+        groupIdx: 1,
+        userIdx: 5,
+        action: "USER_VERIFIED",
+        details: {
+          walletAddress: fakeUsers[5].wallet,
+          collectionId: "40200",
+          tokenId: null,
+        },
+        ago: 4 * 3600000,
+      },
+      {
+        groupIdx: 0,
+        userIdx: null,
+        action: "RULE_ADDED",
+        details: { collectionId: "36105", tokenId: "0", minBalance: 1 },
+        ago: 24 * 3600000,
+      },
+      {
+        groupIdx: 1,
+        userIdx: null,
+        action: "RULE_ADDED",
+        details: { collectionId: "40200", tokenId: null, minBalance: 1 },
+        ago: 20 * 3600000,
+      },
+      {
+        groupIdx: 2,
+        userIdx: 1,
+        action: "USER_VERIFIED",
+        details: {
+          walletAddress: fakeUsers[1].wallet,
+          collectionId: "50100",
+          tokenId: "5",
+        },
+        ago: 3600000,
+      },
+      {
+        groupIdx: 2,
+        userIdx: 4,
+        action: "USER_KICKED",
+        details: { reason: "Verification timeout (1h)" },
+        ago: 172800000,
+      },
     ];
 
     for (const a of actions) {
