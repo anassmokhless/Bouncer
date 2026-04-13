@@ -340,7 +340,9 @@ async function recheckVerifiedMembers(bot: Bot) {
 async function kickExpiredPendingMembers(bot: Bot) {
   const result = await query(
     `SELECT m.id, m.group_id, g.telegram_id AS group_telegram_id,
-            m.user_id, u.telegram_id AS user_telegram_id
+            m.user_id, u.telegram_id AS user_telegram_id,
+            (SELECT COUNT(*) FROM audit_logs a
+             WHERE a.group_id = m.group_id AND a.user_id = m.user_id AND a.action = 'USER_KICKED') AS previous_kicks
      FROM members m
      JOIN groups g ON g.id = m.group_id
      JOIN users u ON u.id = m.user_id
@@ -348,15 +350,7 @@ async function kickExpiredPendingMembers(bot: Bot) {
   );
 
   for (const row of result.rows) {
-    // Count previous kicks for this user in this group
-    const kickHistory = await query(
-      `SELECT COUNT(*) FROM audit_logs
-       WHERE group_id = $1 AND user_id = $2 AND action = 'USER_KICKED'`,
-      [row.group_id, row.user_id],
-    );
-
-    const previousKicks = parseInt(kickHistory.rows[0].count);
-    const isBan = previousKicks >= 4;
+    const isBan = parseInt(row.previous_kicks) >= 4;
 
     try {
       if (isBan) {
