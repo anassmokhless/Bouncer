@@ -4,6 +4,8 @@ import { query, pool } from "../shared/db.js";
 import { getVerifiedWallet, checkNftOwnership } from "../shared/enjin.js";
 
 let isPolling = false;
+let isRechecking = false;
+let isKicking = false;
 
 export function startCronJobs(bot: Bot) {
   // Poll pending QR verifications every 15 seconds
@@ -20,20 +22,28 @@ export function startCronJobs(bot: Bot) {
   });
 
   cron.schedule("*/10 * * * *", async () => {
+    if (isRechecking) return;
+    isRechecking = true;
     console.log("[CRON] Running NFT ownership re-check...");
     try {
       await recheckVerifiedMembers(bot);
     } catch (err) {
       console.error("[CRON] Re-check failed:", err);
+    } finally {
+      isRechecking = false;
     }
   });
 
   cron.schedule("0 * * * *", async () => {
+    if (isKicking) return;
+    isKicking = true;
     console.log("[CRON] Checking for expired pending members...");
     try {
       await kickExpiredPendingMembers(bot);
     } catch (err) {
       console.error("[CRON] Kick expired failed:", err);
+    } finally {
+      isKicking = false;
     }
   });
 
