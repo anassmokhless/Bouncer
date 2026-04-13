@@ -21,7 +21,18 @@ app.set("trust proxy", 1);
 app.set("view engine", "ejs");
 app.set("views", path.resolve(import.meta.dirname, "../../views"));
 
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "https://telegram.org"],
+        frameSrc: ["'self'", "https://oauth.telegram.org"],
+        imgSrc: ["'self'", "data:"],
+      },
+    },
+  }),
+);
 app.use(express.static(path.resolve(import.meta.dirname, "../../public")));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

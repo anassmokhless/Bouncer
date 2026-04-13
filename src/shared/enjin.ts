@@ -16,12 +16,6 @@ function getClient() {
 //types
 interface TokenAccountNode {
   balance: string;
-  token: {
-    tokenId: string;
-    collection: {
-      collectionId: string;
-    };
-  };
 }
 
 interface GetWalletResponse {
@@ -106,41 +100,60 @@ export async function checkNftOwnership(
   tokenId: string | null,
   minBalance: number = 1,
 ): Promise<boolean> {
-  const query = gql`
-    query GetWallet($address: String!) {
-      GetWallet(account: $address) {
-        tokenAccounts(first: 100) {
-          edges {
-            node {
-              balance
-              token {
-                tokenId
-                collection {
-                  collectionId
+  try {
+    if (tokenId) {
+      // Specific token: use bulkFilter for exact match
+      const q = gql`
+        query GetWallet($address: String!, $bulkFilter: [TokenFilterInput!]) {
+          GetWallet(account: $address) {
+            tokenAccounts(first: 1, bulkFilter: $bulkFilter) {
+              edges {
+                node {
+                  balance
                 }
               }
             }
           }
         }
-      }
+      `;
+
+      const data = await getClient().request<GetWalletResponse>(q, {
+        address: walletAddress,
+        bulkFilter: [{ collectionId, tokenIds: [tokenId] }],
+      });
+
+      if (!data.GetWallet) return false;
+      const edges = data.GetWallet.tokenAccounts.edges;
+      if (edges.length === 0) return false;
+      return parseInt(edges[0].node.balance) >= minBalance;
+    } else {
+      // Any token in collection: sum all balances
+      const q = gql`
+        query GetWallet($address: String!, $collectionIds: [BigInt!]) {
+          GetWallet(account: $address) {
+            tokenAccounts(first: 100, collectionIds: $collectionIds) {
+              edges {
+                node {
+                  balance
+                }
+              }
+            }
+          }
+        }
+      `;
+
+      const data = await getClient().request<GetWalletResponse>(q, {
+        address: walletAddress,
+        collectionIds: [collectionId],
+      });
+
+      if (!data.GetWallet) return false;
+      const total = data.GetWallet.tokenAccounts.edges.reduce(
+        (sum, e) => sum + parseInt(e.node.balance),
+        0,
+      );
+      return total >= minBalance;
     }
-  `;
-
-  try {
-    const data = await getClient().request<GetWalletResponse>(query, {
-      address: walletAddress,
-    });
-
-    if (!data.GetWallet) return false;
-
-    const tokens = data.GetWallet.tokenAccounts.edges.map((e) => e.node);
-
-    return tokens.some((t) => {
-      const matchesCollection = t.token.collection.collectionId === collectionId;
-      const matchesToken = tokenId ? t.token.tokenId === tokenId : true;
-      const matchesBalance = parseInt(t.balance) >= minBalance;
-      return matchesCollection && matchesToken && matchesBalance;
-    });
   } catch (error) {
     console.error("[ENJIN] NFT check failed:", error);
     return false;
