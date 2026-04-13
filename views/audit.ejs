@@ -36,6 +36,10 @@
         <span class="bg-gray-500/15 text-gray-400 text-xs px-2 py-1 rounded-full whitespace-nowrap">RULE_REMOVED</span>
         <span class="text-gray-400">Admin removed an NFT rule from a group.</span>
       </div>
+      <div class="flex items-start gap-2">
+        <span class="bg-gray-500/15 text-gray-400 text-xs px-2 py-1 rounded-full whitespace-nowrap">USER_LEFT</span>
+        <span class="text-gray-400">User left the group on their own.</span>
+      </div>
     </div>
   </details>
 
@@ -55,7 +59,7 @@
             </tr>
           </thead>
           <tbody>
-            <% const actionColors = { USER_VERIFIED: 'bg-emerald-500/15 text-emerald-400', USER_AUTO_VERIFIED: 'bg-emerald-500/15 text-emerald-400', USER_KICKED: 'bg-red-500/15 text-red-400', USER_KICKED_MANUAL: 'bg-red-500/15 text-red-400', RULE_ADDED: 'bg-cyan-500/15 text-cyan-400', RULE_REMOVED: 'bg-gray-500/15 text-gray-400' }; %>
+            <% const actionColors = { USER_VERIFIED: 'bg-emerald-500/15 text-emerald-400', USER_AUTO_VERIFIED: 'bg-emerald-500/15 text-emerald-400', USER_KICKED: 'bg-red-500/15 text-red-400', USER_KICKED_MANUAL: 'bg-red-500/15 text-red-400', USER_LEFT: 'bg-gray-500/15 text-gray-400', RULE_ADDED: 'bg-cyan-500/15 text-cyan-400', RULE_REMOVED: 'bg-gray-500/15 text-gray-400' }; %>
             <% logs.forEach(log => { %>
               <tr class="border-b border-slate-800">
                 <td class="px-5 py-3 text-gray-500 whitespace-nowrap"><%= new Date(log.created_at).toLocaleString() %></td>

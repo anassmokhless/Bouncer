@@ -11,6 +11,7 @@ import { statusCommand } from "./commands/status.js";
 import { registerSetupCommands } from "./commands/setup.js";
 import { handleNewMembers } from "./handlers/new-member.js";
 import { handleBotAdded } from "./handlers/bot-added.js";
+import { handleMemberLeft } from "./handlers/member-left.js";
 import { startCronJobs } from "./cron.js";
 
 const bot = new Bot(process.env.BOT_TOKEN!);
@@ -34,6 +35,7 @@ bot.command("unlink", unlinkCommand);
 bot.command("status", statusCommand);
 registerSetupCommands(bot);
 bot.on("my_chat_member", handleBotAdded);
+bot.on("chat_member", handleMemberLeft);
 bot.on(":new_chat_members", handleNewMembers);
 
 bot.catch((err) => {

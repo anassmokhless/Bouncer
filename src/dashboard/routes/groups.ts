@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { query } from "../../shared/db.js";
 import { checkNftOwnership } from "../../shared/enjin.js";
-import { requireLogin } from "../middleware.js";
+import { requireLogin, requireGroupAdmin } from "../middleware.js";
 
 const router = Router();
 router.use(requireLogin);
@@ -35,20 +35,9 @@ router.get("/", async (req: Request, res: Response) => {
 });
 
 // Group detail
-router.get("/:id", async (req: Request, res: Response) => {
+router.get("/:id", requireGroupAdmin, async (req: Request, res: Response) => {
   const user = req.session.user!;
   const groupId = req.params.id;
-
-  const adminCheck = await query(
-    `SELECT 1 FROM group_admins ga JOIN users u ON u.id = ga.user_id
-     WHERE ga.group_id = $1 AND u.telegram_id = $2`,
-    [groupId, user.telegramId],
-  );
-
-  if (adminCheck.rows.length === 0) {
-    res.redirect("/dashboard");
-    return;
-  }
 
   const groupResult = await query(`SELECT * FROM groups WHERE id = $1`, [groupId]);
   if (groupResult.rows.length === 0) {
@@ -72,20 +61,9 @@ router.get("/:id", async (req: Request, res: Response) => {
 });
 
 // Manual re-check
-router.post("/:id/recheck", async (req: Request, res: Response) => {
+router.post("/:id/recheck", requireGroupAdmin, async (req: Request, res: Response) => {
   const user = req.session.user!;
   const groupId = req.params.id;
-
-  const adminCheck = await query(
-    `SELECT 1 FROM group_admins ga JOIN users u ON u.id = ga.user_id
-     WHERE ga.group_id = $1 AND u.telegram_id = $2`,
-    [groupId, user.telegramId],
-  );
-
-  if (adminCheck.rows.length === 0) {
-    res.status(403).json({ error: "Forbidden" });
-    return;
-  }
 
   const groupResult = await query(`SELECT telegram_id FROM groups WHERE id = $1`, [groupId]);
   if (groupResult.rows.length === 0) {
@@ -152,20 +130,9 @@ router.post("/:id/recheck", async (req: Request, res: Response) => {
 });
 
 // Add rule
-router.post("/:id/rules", async (req: Request, res: Response) => {
+router.post("/:id/rules", requireGroupAdmin, async (req: Request, res: Response) => {
   const user = req.session.user!;
   const groupId = req.params.id;
-
-  const adminCheck = await query(
-    `SELECT 1 FROM group_admins ga JOIN users u ON u.id = ga.user_id
-     WHERE ga.group_id = $1 AND u.telegram_id = $2`,
-    [groupId, user.telegramId],
-  );
-
-  if (adminCheck.rows.length === 0) {
-    res.status(403).json({ error: "Forbidden" });
-    return;
-  }
 
   const { collectionId, tokenId, minBalance } = req.body;
 
@@ -190,20 +157,9 @@ router.post("/:id/rules", async (req: Request, res: Response) => {
 });
 
 // Delete rule
-router.post("/:id/rules/:ruleId/delete", async (req: Request, res: Response) => {
+router.post("/:id/rules/:ruleId/delete", requireGroupAdmin, async (req: Request, res: Response) => {
   const user = req.session.user!;
   const { id: groupId, ruleId } = req.params;
-
-  const adminCheck = await query(
-    `SELECT 1 FROM group_admins ga JOIN users u ON u.id = ga.user_id
-     WHERE ga.group_id = $1 AND u.telegram_id = $2`,
-    [groupId, user.telegramId],
-  );
-
-  if (adminCheck.rows.length === 0) {
-    res.status(403).json({ error: "Forbidden" });
-    return;
-  }
 
   await query(
     `UPDATE nft_rules SET is_active = false WHERE id = $1 AND group_id = $2`,
