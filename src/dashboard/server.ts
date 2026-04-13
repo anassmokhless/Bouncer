@@ -27,6 +27,7 @@ app.use(
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'", "'unsafe-inline'", "https://telegram.org"],
+        scriptSrcAttr: ["'unsafe-inline'"],
         frameSrc: ["'self'", "https://oauth.telegram.org"],
         imgSrc: ["'self'", "data:"],
       },
