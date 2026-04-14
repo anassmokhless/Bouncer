@@ -7,6 +7,7 @@ import { removeCheckedPair, pruneCheckedPairs } from "./handlers/existing-member
 let isPolling = false;
 let isRechecking = false;
 let isKicking = false;
+let isLeaving = false;
 
 export function startCronJobs(bot: Bot) {
   // Poll pending QR verifications every 15 seconds
@@ -52,10 +53,14 @@ export function startCronJobs(bot: Bot) {
 
   // Check for groups where admin didn't verify in time — every minute
   cron.schedule("* * * * *", async () => {
+    if (isLeaving) return;
+    isLeaving = true;
     try {
       await leaveUnverifiedGroups(bot);
     } catch (err) {
       console.error("[CRON] Leave unverified groups failed:", err);
+    } finally {
+      isLeaving = false;
     }
   });
 

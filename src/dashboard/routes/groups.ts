@@ -140,7 +140,7 @@ router.post("/:id/recheck", requireGroupAdmin, async (req: Request, res: Respons
   for (let i = 0; i < walleted.length; i += BATCH_SIZE) {
     const batch = walleted.slice(i, i + BATCH_SIZE);
 
-    const results = await Promise.all(batch.map(async (member: { id: string; wallet_address: string; user_id: string; user_telegram_id: string }) => {
+    await Promise.all(batch.map(async (member: { id: string; wallet_address: string; user_id: string; user_telegram_id: string }) => {
       checked++;
 
       let stillHolds = false;

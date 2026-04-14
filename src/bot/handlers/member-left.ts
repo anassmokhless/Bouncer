@@ -37,7 +37,7 @@ export async function handleMemberLeft(ctx: Context) {
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK");
-    throw err;
+    console.error("[BOT] Failed to update member-left status:", err);
   } finally {
     client.release();
   }

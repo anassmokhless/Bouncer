@@ -5,12 +5,14 @@ import { query } from "../../shared/db.js";
 const router = Router();
 
 router.get("/telegram/callback", async (req: Request, res: Response) => {
-  const data = req.query as any;
+  const { id, first_name, username, photo_url, auth_date, hash } = req.query as Record<string, string>;
 
-  if (!data.id || !data.hash) {
+  if (!id || !hash) {
     res.status(400).send("Missing Telegram auth data");
     return;
   }
+
+  const data = { id, first_name, username, photo_url, auth_date, hash };
 
   if (!verifyTelegramLogin(data)) {
     res.status(401).send("Invalid Telegram login");

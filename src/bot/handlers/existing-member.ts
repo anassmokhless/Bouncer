@@ -31,7 +31,6 @@ export async function handleExistingMember(ctx: Context) {
   // Already checked within TTL — skip
   const lastChecked = checkedPairs.get(key);
   if (lastChecked && Date.now() - lastChecked < CACHE_TTL_MS) return;
-  checkedPairs.set(key, Date.now());
 
   // Check if group has active rules
   const groupResult = await query(
@@ -42,7 +41,7 @@ export async function handleExistingMember(ctx: Context) {
     [chatId],
   );
 
-  if (groupResult.rows.length === 0) return; // No rules — skip
+  if (groupResult.rows.length === 0) { checkedPairs.set(key, Date.now()); return; } // No rules — skip
   const groupId = groupResult.rows[0].id;
 
   // Check if user is already tracked as VERIFIED
@@ -53,12 +52,12 @@ export async function handleExistingMember(ctx: Context) {
     [groupId, userId],
   );
 
-  if (memberResult.rows.length > 0 && memberResult.rows[0].status === "VERIFIED") return;
+  if (memberResult.rows.length > 0 && memberResult.rows[0].status === "VERIFIED") { checkedPairs.set(key, Date.now()); return; }
 
   // User is not verified — check if they're an admin (don't restrict admins)
   try {
     const chatMember = await ctx.api.getChatMember(ctx.chat.id, ctx.from.id);
-    if (chatMember.status === "administrator" || chatMember.status === "creator") return;
+    if (chatMember.status === "administrator" || chatMember.status === "creator") { checkedPairs.set(key, Date.now()); return; }
   } catch (err) {
     console.error("[BOT] Failed to check admin status:", err);
     return;
@@ -96,12 +95,18 @@ export async function handleExistingMember(ctx: Context) {
           [groupId, user.id, "USER_AUTO_VERIFIED", JSON.stringify({ collectionId: rule.collection_id })],
         );
 
-        return; // Verified — don't restrict
+        checkedPairs.set(key, Date.now()); return; // Verified — don't restrict
       }
     }
   }
 
-  // Not verified — restrict and prompt
+  // Not verified — delete the message and restrict
+  try {
+    await ctx.deleteMessage();
+  } catch (err) {
+    console.error("[BOT] Failed to delete message from existing member:", err);
+  }
+
   try {
     await ctx.api.restrictChatMember(ctx.chat.id, ctx.from.id, {
       can_send_messages: false,
@@ -144,5 +149,6 @@ export async function handleExistingMember(ctx: Context) {
     console.error("[BOT] Failed to send verification prompt:", err);
   }
 
+  checkedPairs.set(key, Date.now());
   console.log(`[BOT] Existing member ${userId} restricted in ${chatId} — pending verification`);
 }

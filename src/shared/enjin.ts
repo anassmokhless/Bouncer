@@ -22,6 +22,10 @@ interface GetWalletResponse {
   GetWallet: {
     tokenAccounts: {
       edges: Array<{ node: TokenAccountNode }>;
+      pageInfo?: {
+        hasNextPage: boolean;
+        endCursor: string | null;
+      };
     };
   } | null;
 }
@@ -128,32 +132,50 @@ export async function checkNftOwnership(
       if (edges.length === 0) return false;
       return parseInt(edges[0].node.balance) >= minBalance;
     } else {
-      // Any token in collection: sum all balances
+      // Any token in collection: sum all balances with pagination
       const q = gql`
-        query GetWallet($address: String!, $collectionIds: [BigInt!]) {
+        query GetWallet($address: String!, $collectionIds: [BigInt!], $after: String) {
           GetWallet(account: $address) {
-            tokenAccounts(first: 100, collectionIds: $collectionIds) {
+            tokenAccounts(first: 100, collectionIds: $collectionIds, after: $after) {
               edges {
                 node {
                   balance
                 }
+              }
+              pageInfo {
+                hasNextPage
+                endCursor
               }
             }
           }
         }
       `;
 
-      const data = await getClient().request<GetWalletResponse>(q, {
-        address: walletAddress,
-        collectionIds: [collectionId],
-      });
+      let totalBalance = 0;
+      let hasNextPage = true;
+      let afterCursor: string | null = null;
 
-      if (!data.GetWallet) return false;
-      const total = data.GetWallet.tokenAccounts.edges.reduce(
-        (sum, e) => sum + parseInt(e.node.balance),
-        0,
-      );
-      return total >= minBalance;
+      while (hasNextPage) {
+        const data = await getClient().request<GetWalletResponse>(q, {
+          address: walletAddress,
+          collectionIds: [collectionId],
+          after: afterCursor,
+        });
+
+        if (!data.GetWallet) return false;
+
+        for (const edge of data.GetWallet.tokenAccounts.edges) {
+          totalBalance += parseInt(edge.node.balance);
+        }
+
+        // Early exit if threshold already met
+        if (totalBalance >= minBalance) return true;
+
+        hasNextPage = data.GetWallet.tokenAccounts.pageInfo?.hasNextPage ?? false;
+        afterCursor = data.GetWallet.tokenAccounts.pageInfo?.endCursor ?? null;
+      }
+
+      return totalBalance >= minBalance;
     }
   } catch (error) {
     console.error("[ENJIN] NFT check failed:", error);
