@@ -47,7 +47,7 @@ router.get("/", async (req: Request, res: Response) => {
 // Group detail
 router.get("/:id", requireGroupAdmin, async (req: Request, res: Response) => {
   const user = req.session.user!;
-  const groupId = req.params.id;
+  const groupId = req.params.id as string;
 
   const groupResult = await query(`SELECT * FROM groups WHERE id = $1`, [groupId]);
   if (groupResult.rows.length === 0) {
@@ -72,7 +72,7 @@ router.get("/:id", requireGroupAdmin, async (req: Request, res: Response) => {
   const search = ((req.query.search as string) || "").trim();
   const offset = (page - 1) * pageSize;
 
-  const countParams: (string | string)[] = [groupId];
+  const countParams: string[] = [groupId];
   let countWhere = `WHERE m.group_id = $1`;
   if (search) {
     countParams.push(`%${search}%`);
@@ -110,7 +110,7 @@ router.get("/:id", requireGroupAdmin, async (req: Request, res: Response) => {
 // Manual re-check
 router.post("/:id/recheck", requireGroupAdmin, async (req: Request, res: Response) => {
   const user = req.session.user!;
-  const groupId = req.params.id;
+  const groupId = req.params.id as string;
 
   const groupResult = await query(`SELECT telegram_id FROM groups WHERE id = $1`, [groupId]);
   if (groupResult.rows.length === 0) {
@@ -190,7 +190,7 @@ router.post("/:id/recheck", requireGroupAdmin, async (req: Request, res: Respons
 // Add rule
 router.post("/:id/rules", requireGroupAdmin, async (req: Request, res: Response) => {
   const user = req.session.user!;
-  const groupId = req.params.id;
+  const groupId = req.params.id as string;
 
   const { collectionId, tokenId, minBalance, checkInterval } = req.body;
 

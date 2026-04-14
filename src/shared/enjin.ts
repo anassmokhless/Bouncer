@@ -156,7 +156,7 @@ export async function checkNftOwnership(
       let afterCursor: string | null = null;
 
       while (hasNextPage) {
-        const data = await getClient().request<GetWalletResponse>(q, {
+        const data: GetWalletResponse = await getClient().request<GetWalletResponse>(q, {
           address: walletAddress,
           collectionIds: [collectionId],
           after: afterCursor,

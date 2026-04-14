@@ -386,7 +386,7 @@ async function kickExpiredPendingMembers(bot: Bot) {
       await client.query(
         `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
         [row.group_id, row.user_id, isBan ? "USER_BANNED" : "USER_KICKED",
-         JSON.stringify({ reason: isBan ? "Banned after 5 failed verifications" : "Verification timeout (1h)" })],
+         JSON.stringify({ reason: isBan ? "Banned after 5 failed verifications" : "Verification timeout" })],
       );
       await client.query("COMMIT");
     } catch (err) {
