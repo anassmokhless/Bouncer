@@ -36,7 +36,7 @@ bot.use(async (ctx, next) => {
 bot.command("start", async (ctx) => {
   await ctx.reply(
     [
-      "Welcome! I gate Telegram groups based on Enjin NFT ownership.",
+      "Welcome! I control access to Telegram groups based on Enjin NFT ownership.",
       "",
       "Commands:",
       "/verify — Link your Enjin wallet (QR code)",

@@ -180,10 +180,10 @@ export async function handleExistingMember(ctx: Context) {
 
   try {
     await ctx.api.sendMessage(ctx.chat.id, [
-      `${ctx.from.first_name}, this group requires NFT verification.`,
+      `${ctx.from.first_name}, access to this group requires an Enjin NFT.`,
       "",
       "You are muted until you verify your wallet.",
-      `DM me to verify: [Click here to start](https://t.me/${process.env.BOT_USERNAME}?start=verify)`,
+      `DM me to verify: [Start verification](https://t.me/${process.env.BOT_USERNAME}?start=verify)`,
       "",
       "You have 24 hours to verify or you'll be removed.",
     ].join("\n"), { parse_mode: "Markdown" });

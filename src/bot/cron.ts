@@ -136,7 +136,7 @@ async function pollPendingVerifications(bot: Bot) {
       // out of the loop and blocks processing of every other pending row in this batch.
       try {
         await bot.api.sendMessage(parseInt(row.telegram_chat_id),
-          "This wallet is already linked to another Telegram account.");
+          "This wallet is already linked to another Telegram account. Please use a different wallet.");
       } catch (err) {
         console.error(`[CRON] Failed to notify ${row.user_telegram_id} of duplicate wallet:`, err);
       }
@@ -288,9 +288,9 @@ async function pollPendingVerifications(bot: Bot) {
     if (verifiedGroups.length > 0) {
       message = `Wallet \`${walletAddress}\` verified! You have access to ${verifiedGroups.length} group(s).`;
     } else if (groupMap.size === 0) {
-      message = `Wallet \`${walletAddress}\` verified and linked!\n\nJoin an NFT-gated group and I'll automatically check your holdings.`;
+      message = `Wallet \`${walletAddress}\` verified!\n\nJoin an NFT-gated group and I'll automatically check your holdings.`;
     } else {
-      message = `Wallet \`${walletAddress}\` verified and linked, but you don't hold the required NFTs for your current groups. You will remain muted until you hold the required NFTs.`;
+      message = `Wallet \`${walletAddress}\` verified, but you don't hold the NFTs required for your current groups. You'll stay muted until you do.`;
     }
 
     try {

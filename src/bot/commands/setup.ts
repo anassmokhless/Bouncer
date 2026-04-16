@@ -23,7 +23,7 @@ async function isAuthorizedAdmin(ctx: Context): Promise<boolean> {
 
   if (!(await checkBouncerAccess(ctx.from.id.toString()))) {
     await ctx.reply(
-      "You need a Bouncer Pass NFT to use admin commands. DM me /verify to link your wallet.",
+      "You need a Bouncer Pass NFT to use admin commands. DM me and run /verify to link your wallet.",
     );
     return false;
   }
@@ -86,7 +86,7 @@ export function registerSetupCommands(bot: Bot) {
           "",
           "Examples:",
           "  /addrule 1234             — Any token in collection 1234",
-          "  /addrule 1234 5678        — Token 5678 in collection 1234",
+          "  /addrule 1234 5678        — Only token 5678",
           "  /addrule 1234 5678 3      — At least 3 of token 5678",
         ].join("\n"),
       );
@@ -144,10 +144,10 @@ export function registerSetupCommands(bot: Bot) {
           `  Token: ${tokenId || "Any"}`,
           `  Min balance: ${minBalance}`,
           "",
-          "Existing members: DM me to verify your wallet.",
+          "Existing members — to keep your access, DM me and run /verify.",
           `Start here: https://t.me/${process.env.BOT_USERNAME}?start=verify`,
           "",
-          "Unverified members will be removed during the next check.",
+          "Anyone unverified will be removed on the next scheduled re-check.",
         ].join("\n"),
       );
     } catch (err) {
@@ -212,8 +212,14 @@ export function registerSetupCommands(bot: Bot) {
         [chatId],
       );
 
-      if (result.rows.length === 0 || ruleNumber > result.rows.length) {
-        await ctx.reply("Invalid rule number. Use /rules to see the list.");
+      if (result.rows.length === 0) {
+        await ctx.reply("No rules configured yet. Use /addrule to add one.");
+        return;
+      }
+      if (ruleNumber > result.rows.length) {
+        await ctx.reply(
+          `No rule at slot ${ruleNumber}. You have ${result.rows.length} rule(s) configured — use /rules to see them.`,
+        );
         return;
       }
 
@@ -239,7 +245,9 @@ export function registerSetupCommands(bot: Bot) {
         ],
       );
 
-      await ctx.reply(`Rule ${ruleNumber} removed.`);
+      await ctx.reply(
+        `Rule ${ruleNumber} removed: Collection ${rule.collection_id}, Token ${rule.token_id || "Any"}.`,
+      );
     } catch (err) {
       console.error("[BOT] /removerule failed:", err);
       try {

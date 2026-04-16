@@ -45,7 +45,7 @@ export async function handleBotAdded(ctx: Context) {
         try {
             await ctx.api.sendMessage(
                 chatId,
-                "Bouncer is in early access. The admin who added me needs a Bouncer Pass NFT. DM me /verify to link your wallet first.",
+                "Bouncer is in early access. The admin who added me needs a Bouncer Pass NFT. DM me and run /verify to link your wallet first.",
             );
             await ctx.api.leaveChat(chatId);
         } catch (err) {

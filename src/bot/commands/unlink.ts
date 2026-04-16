@@ -46,7 +46,7 @@ export async function unlinkCommand(ctx: Context) {
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("[BOT] Failed to unlink wallet:", err);
-    await ctx.reply("Something went wrong. Please try again.");
+    await ctx.reply("Something went wrong while unlinking your wallet. Please try again.");
     return;
   } finally {
     client.release();
@@ -77,6 +77,6 @@ export async function unlinkCommand(ctx: Context) {
   }
 
   await ctx.reply(
-    "Wallet unlinked. Your group memberships have been reset to pending. You have 1 hour to re-verify or you'll be removed.\n\nUse /verify to link a new wallet.",
+    "Wallet unlinked. Your access to NFT-gated groups has been paused. You have 1 hour to re-verify or you'll be removed.\n\nUse /verify to link a new wallet.",
   );
 }
