@@ -9,6 +9,33 @@ const api = new Api(process.env.BOT_TOKEN!);
 const router = Router();
 router.use(requireLogin);
 
+// Manual-recheck job tracking. Holds in-memory state for background recheck tasks so
+// we can return HTTP 202 immediately (not block the socket for minutes on large groups)
+// and let the client poll a separate status endpoint for progress. Keyed by groupId —
+// one concurrent job per group is enough for admin-initiated rechecks.
+type RecheckJob = {
+  groupId: string;
+  total: number;
+  checked: number;
+  kicked: number;
+  status: "running" | "done" | "error";
+  error?: string;
+  startedAt: number;
+  finishedAt?: number;
+};
+const rechecksInProgress = new Map<string, RecheckJob>();
+const JOB_RETENTION_MS = 5 * 60 * 1000; // 5 min — long enough for a late poll to see the result, short enough to auto-cleanup
+
+/** Opportunistic cleanup: drop completed jobs older than the retention window. */
+function pruneRechecksInProgress() {
+  const cutoff = Date.now() - JOB_RETENTION_MS;
+  for (const [key, job] of rechecksInProgress) {
+    if (job.status !== "running" && job.finishedAt !== undefined && job.finishedAt < cutoff) {
+      rechecksInProgress.delete(key);
+    }
+  }
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 router.param("id", (req, res, next, value) => {
   if (!UUID_RE.test(value)) {
@@ -107,10 +134,28 @@ router.get("/:id", requireGroupAdmin, async (req: Request, res: Response) => {
   });
 });
 
-// Manual re-check
+// Manual re-check — backgrounded.
+//
+// The old implementation awaited the entire recheck loop before responding, which held
+// the HTTP socket open for up to minutes on large groups. Most reverse proxies kill
+// connections after 60-120s, so admins of bigger groups got timeout errors even though
+// the work completed server-side. This version returns 202 immediately and runs the
+// recheck in the background; the client polls GET /:id/recheck/status for progress.
+//
+// Concurrency: one running job per group (second admin clicking recheck while one is
+// in progress gets 409). Completed jobs are retained for JOB_RETENTION_MS so clients
+// that poll late still see the final result, then auto-pruned.
 router.post("/:id/recheck", requireGroupAdmin, async (req: Request, res: Response) => {
   const user = req.session.user!;
   const groupId = req.params.id as string;
+
+  pruneRechecksInProgress();
+
+  const existing = rechecksInProgress.get(groupId);
+  if (existing && existing.status === "running") {
+    res.status(409).json({ error: "A re-check is already running for this group.", status: existing });
+    return;
+  }
 
   const groupResult = await query(`SELECT telegram_id FROM groups WHERE id = $1`, [groupId]);
   if (groupResult.rows.length === 0) {
@@ -131,60 +176,109 @@ router.post("/:id/recheck", requireGroupAdmin, async (req: Request, res: Respons
     [groupId],
   );
 
-  let checked = 0;
-  let kicked = 0;
-
   const BATCH_SIZE = 5;
   const walleted = members.rows.filter((m: { wallet_address: string | null }) => m.wallet_address);
 
-  for (let i = 0; i < walleted.length; i += BATCH_SIZE) {
-    const batch = walleted.slice(i, i + BATCH_SIZE);
+  // Initialise the job record BEFORE dispatching so the client's first poll sees it.
+  const job: RecheckJob = {
+    groupId,
+    total: walleted.length,
+    checked: 0,
+    kicked: 0,
+    status: "running",
+    startedAt: Date.now(),
+  };
+  rechecksInProgress.set(groupId, job);
 
-    await Promise.all(batch.map(async (member: { id: string; wallet_address: string; user_id: string; user_telegram_id: string }) => {
-      checked++;
+  // Capture session-scoped values before handing off to the background task — req/res
+  // are not valid outside this handler.
+  const triggeredBy = user.telegramId;
 
-      let stillHolds = false;
-      let apiError = false;
-      for (const rule of rules.rows) {
-        const result = await checkNftOwnership(member.wallet_address, rule.collection_id, rule.token_id, rule.min_balance);
-        if (result === null) {
-          apiError = true;
-          break;
-        }
-        if (result) {
-          stillHolds = true;
-          break;
-        }
+  // Fire-and-forget background work. Errors are captured into the job record so the
+  // client can surface them via the status endpoint.
+  (async () => {
+    try {
+      for (let i = 0; i < walleted.length; i += BATCH_SIZE) {
+        const batch = walleted.slice(i, i + BATCH_SIZE);
+
+        await Promise.all(batch.map(async (member: { id: string; wallet_address: string; user_id: string; user_telegram_id: string }) => {
+          job.checked++;
+
+          let stillHolds = false;
+          let apiError = false;
+          for (const rule of rules.rows) {
+            const result = await checkNftOwnership(member.wallet_address, rule.collection_id, rule.token_id, rule.min_balance);
+            if (result === null) {
+              apiError = true;
+              break;
+            }
+            if (result) {
+              stillHolds = true;
+              break;
+            }
+          }
+
+          if (apiError) return;
+
+          if (!stillHolds) {
+            let kickSuccess = false;
+            try {
+              await api.banChatMember(parseInt(groupTelegramId), parseInt(member.user_telegram_id), {
+                until_date: Math.floor(Date.now() / 1000) + 40,
+              });
+              kickSuccess = true;
+            } catch (err) {
+              console.error(`[DASHBOARD] Failed to kick ${member.user_telegram_id}:`, err);
+            }
+
+            if (kickSuccess) {
+              await query(`UPDATE members SET status = 'KICKED', last_checked = now() WHERE id = $1 AND status = 'VERIFIED'`, [member.id]);
+              await query(
+                `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
+                [groupId, member.user_id, "USER_KICKED_MANUAL", JSON.stringify({ triggeredBy })],
+              );
+              job.kicked++;
+            }
+          } else {
+            await query(`UPDATE members SET last_checked = now() WHERE id = $1 AND status = 'VERIFIED'`, [member.id]);
+          }
+        }));
       }
 
-      if (apiError) return;
+      job.status = "done";
+      job.finishedAt = Date.now();
+    } catch (err) {
+      console.error(`[DASHBOARD] Recheck job for group ${groupId} failed:`, err);
+      job.status = "error";
+      job.error = err instanceof Error ? err.message : String(err);
+      job.finishedAt = Date.now();
+    }
+  })();
 
-      if (!stillHolds) {
-        let kickSuccess = false;
-        try {
-          await api.banChatMember(parseInt(groupTelegramId), parseInt(member.user_telegram_id), {
-            until_date: Math.floor(Date.now() / 1000) + 40,
-          });
-          kickSuccess = true;
-        } catch (err) {
-          console.error(`[DASHBOARD] Failed to kick ${member.user_telegram_id}:`, err);
-        }
+  res.status(202).json({ status: "started", total: job.total });
+});
 
-        if (kickSuccess) {
-          await query(`UPDATE members SET status = 'KICKED', last_checked = now() WHERE id = $1 AND status = 'VERIFIED'`, [member.id]);
-          await query(
-            `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-            [groupId, member.user_id, "USER_KICKED_MANUAL", JSON.stringify({ triggeredBy: user.telegramId })],
-          );
-          kicked++;
-        }
-      } else {
-        await query(`UPDATE members SET last_checked = now() WHERE id = $1 AND status = 'VERIFIED'`, [member.id]);
-      }
-    }));
+// Recheck status — polled by the client to track background job progress.
+router.get("/:id/recheck/status", requireGroupAdmin, async (req: Request, res: Response) => {
+  const groupId = req.params.id as string;
+
+  pruneRechecksInProgress();
+
+  const job = rechecksInProgress.get(groupId);
+  if (!job) {
+    res.json({ status: "idle" });
+    return;
   }
 
-  res.json({ checked, kicked });
+  res.json({
+    status: job.status,
+    total: job.total,
+    checked: job.checked,
+    kicked: job.kicked,
+    error: job.error,
+    startedAt: job.startedAt,
+    finishedAt: job.finishedAt,
+  });
 });
 
 // Add rule
@@ -196,6 +290,17 @@ router.post("/:id/rules", requireGroupAdmin, async (req: Request, res: Response)
 
   if (!collectionId) {
     res.status(400).json({ error: "Collection ID is required" });
+    return;
+  }
+
+  // Enjin collection/token IDs are numeric. Reject non-numeric input early so admins get
+  // clear feedback instead of silently-broken rules that never verify anyone.
+  if (!/^\d+$/.test(collectionId)) {
+    res.status(400).json({ error: "Collection ID must be numeric" });
+    return;
+  }
+  if (tokenId && !/^\d+$/.test(tokenId)) {
+    res.status(400).json({ error: "Token ID must be numeric" });
     return;
   }
 

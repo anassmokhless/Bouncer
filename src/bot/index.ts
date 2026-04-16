@@ -3,6 +3,9 @@ import path from "path";
 
 dotenv.config({ path: path.resolve(import.meta.dirname, "../../.env") });
 
+import { validateEnv } from "../shared/env.js";
+validateEnv();
+
 import { Bot, GrammyError, HttpError } from "grammy";
 import { pool } from "../shared/db.js";
 import { verifyCommand } from "./commands/verify.js";

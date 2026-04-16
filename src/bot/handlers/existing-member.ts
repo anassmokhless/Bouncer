@@ -3,9 +3,33 @@ import { query } from "../../shared/db.js";
 import { checkNftOwnership } from "../../shared/enjin.js";
 import { getOrCreateUser } from "../helpers.js";
 
-// TTL cache: checked user-group pairs expire after 1 hour
-const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+// Per-entry TTL cache: map value is the "valid until" timestamp (ms since epoch).
+// Different scenarios use different TTLs — successful checks cache for 1 hour, API
+// errors cache a short backoff to prevent 429 cascades without keeping stale data around.
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour — normal TTL after a successful check
+const ADMIN_TTL_MS = 5 * 60 * 1000;  // 5 minutes — shorter TTL for admin status so demotions take effect quickly
+const ERROR_BACKOFF_MS = 30 * 1000;  // 30 seconds — short backoff after an API error
+
+// Hard size cap protects against memory amplification in raid-style attacks where
+// attackers flood a gated group with many unique (chatId, userId) pairs faster than
+// the hourly prune can reclaim expired entries. Without this, a SIM-farm raid could
+// push the Map into hundreds of MB before the next prune runs. At ~110 bytes/entry,
+// 50K caps memory at ~5.5MB. Eviction is FIFO (oldest insertion first) since Map
+// preserves insertion order; an evicted legitimate user just re-checks on their next
+// message (2 DB queries + 1 Telegram API call — not free but not harmful).
+const MAX_CACHE_SIZE = 50_000;
 const checkedPairs = new Map<string, number>();
+
+/** Set a cache entry, enforcing the size cap via FIFO eviction when full */
+function setChecked(key: string, validUntil: number) {
+  // Only evict if we're at the cap AND this is a brand-new key — if key already
+  // exists, .set() updates in place without growing the Map.
+  if (checkedPairs.size >= MAX_CACHE_SIZE && !checkedPairs.has(key)) {
+    const oldest = checkedPairs.keys().next().value;
+    if (oldest !== undefined) checkedPairs.delete(oldest);
+  }
+  checkedPairs.set(key, validUntil);
+}
 
 /** Remove a specific pair so the user gets re-checked on next message */
 export function removeCheckedPair(chatId: string, userId: string) {
@@ -15,8 +39,8 @@ export function removeCheckedPair(chatId: string, userId: string) {
 /** Prune all expired entries from the cache */
 export function pruneCheckedPairs() {
   const now = Date.now();
-  for (const [key, timestamp] of checkedPairs) {
-    if (now - timestamp > CACHE_TTL_MS) checkedPairs.delete(key);
+  for (const [key, validUntil] of checkedPairs) {
+    if (validUntil <= now) checkedPairs.delete(key);
   }
 }
 
@@ -29,8 +53,8 @@ export async function handleExistingMember(ctx: Context) {
   const key = `${chatId}:${userId}`;
 
   // Already checked within TTL — skip
-  const lastChecked = checkedPairs.get(key);
-  if (lastChecked && Date.now() - lastChecked < CACHE_TTL_MS) return;
+  const validUntil = checkedPairs.get(key);
+  if (validUntil && Date.now() < validUntil) return;
 
   // Check if group has active rules
   const groupResult = await query(
@@ -41,7 +65,7 @@ export async function handleExistingMember(ctx: Context) {
     [chatId],
   );
 
-  if (groupResult.rows.length === 0) { checkedPairs.set(key, Date.now()); return; } // No rules — skip
+  if (groupResult.rows.length === 0) { setChecked(key, Date.now() + CACHE_TTL_MS); return; } // No rules — skip
   const groupId = groupResult.rows[0].id;
 
   // Check if user is already tracked as VERIFIED
@@ -52,14 +76,18 @@ export async function handleExistingMember(ctx: Context) {
     [groupId, userId],
   );
 
-  if (memberResult.rows.length > 0 && memberResult.rows[0].status === "VERIFIED") { checkedPairs.set(key, Date.now()); return; }
+  if (memberResult.rows.length > 0 && memberResult.rows[0].status === "VERIFIED") { setChecked(key, Date.now() + CACHE_TTL_MS); return; }
 
   // User is not verified — check if they're an admin (don't restrict admins)
   try {
     const chatMember = await ctx.api.getChatMember(ctx.chat.id, ctx.from.id);
-    if (chatMember.status === "administrator" || chatMember.status === "creator") { checkedPairs.set(key, Date.now()); return; }
+    if (chatMember.status === "administrator" || chatMember.status === "creator") { setChecked(key, Date.now() + ADMIN_TTL_MS); return; }
   } catch (err) {
     console.error("[BOT] Failed to check admin status:", err);
+    // Short backoff so spamming messages during a Telegram API blip don't each trigger
+    // another getChatMember call (429 cascade protection). 30s is short enough that an
+    // admin briefly mis-classified during the blip is re-checked quickly after recovery.
+    setChecked(key, Date.now() + ERROR_BACKOFF_MS);
     return;
   }
 
@@ -73,6 +101,8 @@ export async function handleExistingMember(ctx: Context) {
       [groupId],
     );
 
+    let gotCleanApiResult = false;
+
     for (const rule of rules.rows) {
       const hasNft = await checkNftOwnership(
         user.wallet_address,
@@ -82,6 +112,7 @@ export async function handleExistingMember(ctx: Context) {
       );
 
       if (hasNft === null) continue;
+      gotCleanApiResult = true;
       if (hasNft) {
         await query(
           `INSERT INTO members (group_id, user_id, status, last_checked)
@@ -95,8 +126,19 @@ export async function handleExistingMember(ctx: Context) {
           [groupId, user.id, "USER_AUTO_VERIFIED", JSON.stringify({ collectionId: rule.collection_id })],
         );
 
-        checkedPairs.set(key, Date.now()); return; // Verified — don't restrict
+        setChecked(key, Date.now() + CACHE_TTL_MS); return; // Verified — don't restrict
       }
+    }
+
+    // If every rule check errored, we can't fairly evaluate this user — skip without
+    // deleting or restricting. Short backoff so subsequent messages during the outage
+    // don't each re-trigger the full Enjin API check. Once the API recovers, the
+    // recheck cron or the user's next message (after backoff expires) will restrict
+    // them if they truly don't hold the required NFTs.
+    if (rules.rows.length > 0 && !gotCleanApiResult) {
+      console.log(`[BOT] Skipped existing member ${userId} in ${chatId} — Enjin API errored on all rules`);
+      setChecked(key, Date.now() + ERROR_BACKOFF_MS);
+      return;
     }
   }
 
@@ -149,6 +191,6 @@ export async function handleExistingMember(ctx: Context) {
     console.error("[BOT] Failed to send verification prompt:", err);
   }
 
-  checkedPairs.set(key, Date.now());
+  setChecked(key, Date.now() + CACHE_TTL_MS);
   console.log(`[BOT] Existing member ${userId} restricted in ${chatId} — pending verification`);
 }

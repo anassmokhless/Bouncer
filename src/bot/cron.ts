@@ -9,13 +9,48 @@ let isRechecking = false;
 let isKicking = false;
 let isLeaving = false;
 
+// Cross-process coordination via PostgreSQL advisory locks.
+// The in-memory flags above prevent overlapping runs within a single Node process.
+// These lock IDs prevent overlapping runs across multiple bot instances (e.g. during
+// rolling deploys, accidental double-start, or HA setups). Each cron gets a unique
+// stable integer; pg_try_advisory_lock is non-blocking so unavailable locks are a
+// no-op skip (same semantics as the in-memory flag).
+const LOCK_ID_POLL = 1001;
+const LOCK_ID_RECHECK = 1002;
+const LOCK_ID_KICK = 1003;
+const LOCK_ID_LEAVE = 1004;
+
+async function withAdvisoryLock(lockId: number, fn: () => Promise<void>): Promise<void> {
+  const client = await pool.connect();
+  try {
+    const result = await client.query(`SELECT pg_try_advisory_lock($1) AS locked`, [lockId]);
+    if (!result.rows[0].locked) return; // Another instance holds it — skip this tick.
+    try {
+      await fn();
+    } finally {
+      // Best-effort release. If this fails the lock stays held on this pooled connection
+      // until the process exits (TCP disconnect releases session-scoped locks). That's
+      // acceptable degradation — the work still ran, and the next tick will either reuse
+      // this connection (reentrant try_lock returns true — work runs as normal) or get a
+      // different connection.
+      try {
+        await client.query(`SELECT pg_advisory_unlock($1)`, [lockId]);
+      } catch (unlockErr) {
+        console.error(`[CRON] Failed to release advisory lock ${lockId}:`, unlockErr);
+      }
+    }
+  } finally {
+    client.release();
+  }
+}
+
 export function startCronJobs(bot: Bot) {
   // Poll pending QR verifications every 15 seconds
   cron.schedule("*/15 * * * * *", async () => {
     if (isPolling) return;
     isPolling = true;
     try {
-      await pollPendingVerifications(bot);
+      await withAdvisoryLock(LOCK_ID_POLL, () => pollPendingVerifications(bot));
     } catch (err) {
       console.error("[CRON] Verification poll failed:", err);
     } finally {
@@ -28,7 +63,7 @@ export function startCronJobs(bot: Bot) {
     isRechecking = true;
     console.log("[CRON] Running NFT ownership re-check...");
     try {
-      await recheckVerifiedMembers(bot);
+      await withAdvisoryLock(LOCK_ID_RECHECK, () => recheckVerifiedMembers(bot));
     } catch (err) {
       console.error("[CRON] Re-check failed:", err);
     } finally {
@@ -41,9 +76,11 @@ export function startCronJobs(bot: Bot) {
     isKicking = true;
     console.log("[CRON] Checking for expired pending members...");
     try {
-      // Prune expired entries from existing-member TTL cache
-      pruneCheckedPairs();
-      await kickExpiredPendingMembers(bot);
+      await withAdvisoryLock(LOCK_ID_KICK, async () => {
+        // Prune expired entries from existing-member TTL cache
+        pruneCheckedPairs();
+        await kickExpiredPendingMembers(bot);
+      });
     } catch (err) {
       console.error("[CRON] Kick expired failed:", err);
     } finally {
@@ -56,7 +93,7 @@ export function startCronJobs(bot: Bot) {
     if (isLeaving) return;
     isLeaving = true;
     try {
-      await leaveUnverifiedGroups(bot);
+      await withAdvisoryLock(LOCK_ID_LEAVE, () => leaveUnverifiedGroups(bot));
     } catch (err) {
       console.error("[CRON] Leave unverified groups failed:", err);
     } finally {
@@ -93,8 +130,19 @@ async function pollPendingVerifications(bot: Bot) {
     );
 
     if (existing.rows.length > 0) {
-      await bot.api.sendMessage(parseInt(row.telegram_chat_id),
-        "This wallet is already linked to another Telegram account.");
+      // Wrap sendMessage so a delivery failure (user blocked bot, chat deleted, Telegram
+      // rate limit) doesn't abort this cron tick and leave the pending row stranded for
+      // up to 10 min until the expires_at sweep. Without this, the exception propagates
+      // out of the loop and blocks processing of every other pending row in this batch.
+      try {
+        await bot.api.sendMessage(parseInt(row.telegram_chat_id),
+          "This wallet is already linked to another Telegram account.");
+      } catch (err) {
+        console.error(`[CRON] Failed to notify ${row.user_telegram_id} of duplicate wallet:`, err);
+      }
+      // Always delete the pending row — retrying notification won't help (the wallet is
+      // still claimed by someone else), and keeping the row alive just burns more Enjin
+      // API calls on every 15s tick.
       await query(`DELETE FROM pending_verifications WHERE id = $1`, [row.id]);
       continue;
     }
@@ -187,9 +235,30 @@ async function pollPendingVerifications(bot: Bot) {
       }
 
       await client.query("COMMIT");
-    } catch (err) {
+    } catch (err: any) {
       await client.query("ROLLBACK");
-      console.error(`[CRON] Transaction failed for user ${row.user_telegram_id}:`, err);
+      // 23505 = PostgreSQL unique_violation. The only UNIQUE constraint hit by this transaction
+      // is users.wallet_address — meaning another user claimed this wallet in the race window
+      // between our pre-check SELECT (line 90) and the UPDATE (line 170). Delete the pending row
+      // outside the rolled-back transaction and notify the user — otherwise the cron retries the
+      // same row every 15s until the 10min expiry sweep cleans it up.
+      if (err?.code === "23505") {
+        try {
+          await query(`DELETE FROM pending_verifications WHERE id = $1`, [row.id]);
+        } catch (delErr) {
+          console.error(`[CRON] Failed to delete duplicate-wallet pending row ${row.id}:`, delErr);
+        }
+        try {
+          await bot.api.sendMessage(
+            parseInt(row.telegram_chat_id),
+            "This wallet was just linked to another Telegram account. Please try a different wallet.",
+          );
+        } catch (notifyErr) {
+          console.error(`[CRON] Failed to notify ${row.user_telegram_id} of duplicate wallet:`, notifyErr);
+        }
+      } else {
+        console.error(`[CRON] Transaction failed for user ${row.user_telegram_id}:`, err);
+      }
       continue;
     } finally {
       client.release();
@@ -233,6 +302,15 @@ async function pollPendingVerifications(bot: Bot) {
 }
 
 async function recheckVerifiedMembers(bot: Bot) {
+  // EXISTS filter pushes the "is this member due?" decision into SQL so we only load
+  // members that actually need rechecking instead of every verified member in every
+  // active group. A member is due if ANY of their group's rules has an interval
+  // that has elapsed since last_checked (equivalent to "min interval has elapsed").
+  // Using EXISTS (not a WHERE predicate on r.check_interval_seconds) is important:
+  // we need to load ALL rule rows for due members, so the NFT check loop evaluates
+  // every rule. Filtering on r.check_interval_seconds directly would drop non-due
+  // rules from the result set and cause false kicks for members holding an NFT
+  // that matches only a longer-interval rule.
   const result = await query(
     `SELECT g.id AS group_id, g.telegram_id AS group_telegram_id,
             m.id AS member_id, m.last_checked,
@@ -242,7 +320,14 @@ async function recheckVerifiedMembers(bot: Bot) {
      JOIN members m ON m.group_id = g.id AND m.status = 'VERIFIED'
      JOIN users u ON u.id = m.user_id
      JOIN nft_rules r ON r.group_id = g.id AND r.is_active = true
-     WHERE g.is_active = true AND u.wallet_address IS NOT NULL`,
+     WHERE g.is_active = true
+       AND u.wallet_address IS NOT NULL
+       AND EXISTS (
+         SELECT 1 FROM nft_rules r2
+         WHERE r2.group_id = g.id AND r2.is_active = true
+           AND (m.last_checked IS NULL
+                OR m.last_checked < now() - (r2.check_interval_seconds || ' seconds')::interval)
+       )`,
   );
 
   const memberChecks = new Map<string, {
@@ -280,15 +365,9 @@ async function recheckVerifiedMembers(bot: Bot) {
   let checkedCount = 0;
   let kickedCount = 0;
 
-  // Filter to members due for a recheck
-  const dueMembers = Array.from(memberChecks.values()).filter((member) => {
-    const minInterval = Math.min(...member.rules.map((r) => r.checkInterval));
-    if (member.lastChecked) {
-      const secondsSinceCheck = (Date.now() - new Date(member.lastChecked).getTime()) / 1000;
-      if (secondsSinceCheck < minInterval) return false;
-    }
-    return true;
-  });
+  // SQL already filtered to members due for recheck (see EXISTS clause above), so
+  // every entry in memberChecks is ready to process. No JS-side filter needed.
+  const dueMembers = Array.from(memberChecks.values());
 
   const BATCH_SIZE = 5;
   for (let i = 0; i < dueMembers.length; i += BATCH_SIZE) {
@@ -404,14 +483,18 @@ async function kickExpiredPendingMembers(bot: Bot) {
 }
 
 async function leaveUnverifiedGroups(bot: Bot) {
-  // Find groups where admin_verify_deadline has passed and admin still hasn't linked a wallet
+  // Atomic: find and delete groups where admin_verify_deadline has passed AND admin still hasn't linked a wallet.
+  // The NOT EXISTS check at DELETE time prevents races with pollPendingVerifications updating wallet_address
+  // between a separate SELECT and DELETE. group_admins, nft_rules, members, audit_logs all cascade on groups.id.
   const result = await query(
-    `SELECT g.id, g.telegram_id, g.admin_user_id
-     FROM groups g
-     JOIN users u ON u.id = g.admin_user_id
+    `DELETE FROM groups g
      WHERE g.admin_verify_deadline IS NOT NULL
        AND g.admin_verify_deadline < now()
-       AND u.wallet_address IS NULL`,
+       AND NOT EXISTS (
+         SELECT 1 FROM users u
+         WHERE u.id = g.admin_user_id AND u.wallet_address IS NOT NULL
+       )
+     RETURNING g.id, g.telegram_id`,
   );
 
   for (const row of result.rows) {
@@ -422,13 +505,10 @@ async function leaveUnverifiedGroups(bot: Bot) {
       console.error(`[CRON] Failed to leave group ${row.telegram_id}:`, err);
     }
 
-    await query(`DELETE FROM group_admins WHERE group_id = $1 AND user_id = $2`, [row.id, row.admin_user_id]);
-    await query(`DELETE FROM groups WHERE id = $1`, [row.id]);
-
     console.log(`[CRON] Left group ${row.telegram_id} — admin did not verify in time`);
   }
 
-  // Clear deadline for admins who verified in time
+  // Clear deadline for admins who verified in time (cleanup so the cron stops evaluating these rows)
   await query(
     `UPDATE groups SET admin_verify_deadline = NULL, admin_user_id = NULL
      WHERE admin_verify_deadline IS NOT NULL

@@ -178,8 +178,12 @@ async function recheckAll() {
   const btn = document.getElementById('recheck-btn');
   const result = document.getElementById('recheck-result');
   btn.disabled = true;
-  btn.textContent = 'Checking...';
+  btn.textContent = 'Starting...';
   result.textContent = '';
+
+  // Kick off the background job. The server responds 202 immediately — it does NOT wait
+  // for the recheck to finish. We then poll the status endpoint until it reports done or
+  // error. If another admin is already rechecking this group, server returns 409.
   try {
     const res = await fetch('/dashboard/<%= group.id %>/recheck', {
       method: 'POST',
@@ -187,15 +191,49 @@ async function recheckAll() {
       body: JSON.stringify({}),
     });
     const data = await res.json();
-    if (res.ok) {
-      result.textContent = 'Checked ' + data.checked + ', kicked ' + data.kicked + '.';
-      setTimeout(() => location.reload(), 2000);
-    } else {
+    if (!res.ok) {
       result.textContent = data.error || 'Re-check failed';
+      btn.disabled = false;
+      btn.textContent = 'Re-check NFTs';
+      return;
     }
+
+    // Poll status every 2 seconds until the job finishes or errors.
+    btn.textContent = 'Checking... 0/' + (data.total || 0);
+    const poll = setInterval(async () => {
+      try {
+        const sres = await fetch('/dashboard/<%= group.id %>/recheck/status');
+        const sdata = await sres.json();
+
+        if (sdata.status === 'running') {
+          btn.textContent = 'Checking... ' + sdata.checked + '/' + sdata.total;
+          if (sdata.kicked > 0) {
+            result.textContent = sdata.kicked + ' kicked so far.';
+          }
+        } else if (sdata.status === 'done') {
+          clearInterval(poll);
+          result.textContent = 'Checked ' + sdata.checked + ', kicked ' + sdata.kicked + '.';
+          btn.disabled = false;
+          btn.textContent = 'Re-check NFTs';
+          setTimeout(() => location.reload(), 2000);
+        } else if (sdata.status === 'error') {
+          clearInterval(poll);
+          result.textContent = 'Re-check failed: ' + (sdata.error || 'unknown error');
+          btn.disabled = false;
+          btn.textContent = 'Re-check NFTs';
+        } else {
+          // 'idle' — server restarted or job pruned before we saw completion.
+          clearInterval(poll);
+          result.textContent = 'Re-check status unavailable — job may have completed.';
+          btn.disabled = false;
+          btn.textContent = 'Re-check NFTs';
+        }
+      } catch {
+        // Network blip during polling — keep trying until the interval is cleared.
+      }
+    }, 2000);
   } catch {
     result.textContent = 'Network error';
-  } finally {
     btn.disabled = false;
     btn.textContent = 'Re-check NFTs';
   }

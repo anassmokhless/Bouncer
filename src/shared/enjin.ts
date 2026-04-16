@@ -151,11 +151,21 @@ export async function checkNftOwnership(
         }
       `;
 
+      // Hard page cap prevents runaway pagination on pathological wallets (e.g. an
+      // attacker who minted many tokens in the target collection and transferred them
+      // out, leaving thousands of zero-balance tokenAccount records). Without the cap,
+      // one bad wallet in a recheck batch can stall the entire cron for minutes via
+      // Promise.all. 50 pages × 100 tokens = 5000 token accounts — far above any
+      // realistic legitimate holder. If the cap is hit without meeting the threshold,
+      // return null (same semantic as any other API error: skip this rule this cycle,
+      // don't make a false-negative decision).
+      const MAX_PAGES = 50;
+      let pageCount = 0;
       let totalBalance = 0;
       let hasNextPage = true;
       let afterCursor: string | null = null;
 
-      while (hasNextPage) {
+      while (hasNextPage && pageCount < MAX_PAGES) {
         const data: GetWalletResponse = await getClient().request<GetWalletResponse>(q, {
           address: walletAddress,
           collectionIds: [collectionId],
@@ -173,6 +183,13 @@ export async function checkNftOwnership(
 
         hasNextPage = data.GetWallet.tokenAccounts.pageInfo?.hasNextPage ?? false;
         afterCursor = data.GetWallet.tokenAccounts.pageInfo?.endCursor ?? null;
+        pageCount++;
+      }
+
+      if (hasNextPage) {
+        // Cap hit with more pages remaining and threshold not met — can't fairly decide.
+        console.warn(`[ENJIN] Pagination cap (${MAX_PAGES} pages) hit for ${walletAddress} in collection ${collectionId} (minBalance=${minBalance}, summed=${totalBalance}) — returning null`);
+        return null;
       }
 
       return totalBalance >= minBalance;

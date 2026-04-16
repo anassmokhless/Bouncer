@@ -13,6 +13,9 @@ interface TelegramLoginData {
 export function verifyTelegramLogin(data: TelegramLoginData): boolean {
   const { hash, ...rest } = data;
 
+  // Validate hash format (SHA-256 HMAC is exactly 64 hex characters)
+  if (!hash || !/^[0-9a-f]{64}$/i.test(hash)) return false;
+
   const secret = crypto
     .createHash("sha256")
     .update(process.env.BOT_TOKEN!)

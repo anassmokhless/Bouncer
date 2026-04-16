@@ -3,6 +3,9 @@ import path from "path";
 
 dotenv.config({ path: path.resolve(import.meta.dirname, "../../.env") });
 
+import { validateEnv } from "../shared/env.js";
+validateEnv();
+
 import helmet from "helmet";
 import "../types.js";
 import crypto from "crypto";
@@ -17,7 +20,13 @@ import auditRoutes from "./routes/audit.js";
 const app = express();
 const PgStore = connectPgSimple(session);
 
-app.set("trust proxy", 1);
+// Trust proxy — env-configurable so multi-hop deployments (e.g. Cloudflare → nginx → app)
+// can set TRUST_PROXY=2. Defaults to 1 (single reverse-proxy hop), which matches the
+// documented nginx setup. Numeric strings are parsed as hop counts; non-numeric values
+// pass through so Express keywords like "loopback" or "uniquelocal" still work.
+const trustProxyRaw = process.env.TRUST_PROXY ?? "1";
+const trustProxyNum = Number(trustProxyRaw);
+app.set("trust proxy", Number.isFinite(trustProxyNum) && trustProxyRaw.trim() !== "" ? trustProxyNum : trustProxyRaw);
 app.set("view engine", "ejs");
 app.set("views", path.resolve(import.meta.dirname, "../../views"));
 

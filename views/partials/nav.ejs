@@ -17,11 +17,13 @@
       <span class="text-sm text-gray-500"
         ><%= user.firstName || user.username %></span
       >
-      <a
-        href="/auth/logout"
-        class="text-sm text-red-400 hover:text-red-300 transition-colors"
-        >Sign Out</a
-      >
+      <form action="/auth/logout" method="POST" class="inline">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <button
+          type="submit"
+          class="text-sm text-red-400 hover:text-red-300 transition-colors bg-transparent border-0 cursor-pointer"
+        >Sign Out</button>
+      </form>
     </div>
   </div>
 </nav>

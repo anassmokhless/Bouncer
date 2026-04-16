@@ -63,7 +63,7 @@ router.get("/dev", async (req: Request, res: Response) => {
   res.redirect("/dashboard");
 });
 
-router.get("/logout", (req: Request, res: Response) => {
+router.post("/logout", (req: Request, res: Response) => {
   req.session.destroy(() => {
     res.redirect("/login");
   });

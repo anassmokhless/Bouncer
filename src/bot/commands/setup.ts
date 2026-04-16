@@ -96,41 +96,68 @@ export function registerSetupCommands(bot: Bot) {
     const collectionId = parts[0];
     const tokenId = parts[1] || null;
     const minBalance = parseInt(parts[2]) || 1;
+
+    // Enjin collection/token IDs are numeric. Reject non-numeric input early so admins get
+    // clear feedback instead of silently-broken rules that never verify anyone.
+    if (!/^\d+$/.test(collectionId)) {
+      await ctx.reply("Collection ID must be numeric. Example: /addrule 1234 5678 3");
+      return;
+    }
+    if (tokenId !== null && !/^\d+$/.test(tokenId)) {
+      await ctx.reply("Token ID must be numeric. Example: /addrule 1234 5678 3");
+      return;
+    }
+
     const chatId = ctx.chat!.id.toString();
 
-    const group = await getOrCreateGroup(chatId, ctx.chat!.title || "Unknown");
+    // Wrap DB writes + success reply in try/catch. Without this, any DB error
+    // (transient connectivity blip, constraint violation, etc.) propagates to
+    // grammy's global error handler — which logs but sends nothing back to the
+    // admin. The admin assumes the command succeeded and is confused when /rules
+    // shows no change. Replying with a generic error is safer UX; the real error
+    // is still logged server-side for debugging.
+    try {
+      const group = await getOrCreateGroup(chatId, ctx.chat!.title || "Unknown");
 
-    await query(
-      `INSERT INTO nft_rules (group_id, collection_id, token_id, min_balance)
-       VALUES ($1, $2, $3, $4)`,
-      [group.id, collectionId, tokenId, minBalance],
-    );
+      await query(
+        `INSERT INTO nft_rules (group_id, collection_id, token_id, min_balance)
+         VALUES ($1, $2, $3, $4)`,
+        [group.id, collectionId, tokenId, minBalance],
+      );
 
-    const admin = await syncAdmin(ctx, group.id);
+      const admin = await syncAdmin(ctx, group.id);
 
-    await query(
-      `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-      [
-        group.id,
-        admin.id,
-        "RULE_ADDED",
-        JSON.stringify({ collectionId, tokenId, minBalance }),
-      ],
-    );
+      await query(
+        `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
+        [
+          group.id,
+          admin.id,
+          "RULE_ADDED",
+          JSON.stringify({ collectionId, tokenId, minBalance }),
+        ],
+      );
 
-    await ctx.reply(
-      [
-        "NFT rule added!",
-        `  Collection: ${collectionId}`,
-        `  Token: ${tokenId || "Any"}`,
-        `  Min balance: ${minBalance}`,
-        "",
-        "Existing members: DM me to verify your wallet.",
-        `Start here: https://t.me/${process.env.BOT_USERNAME}?start=verify`,
-        "",
-        "Unverified members will be removed during the next check.",
-      ].join("\n"),
-    );
+      await ctx.reply(
+        [
+          "NFT rule added!",
+          `  Collection: ${collectionId}`,
+          `  Token: ${tokenId || "Any"}`,
+          `  Min balance: ${minBalance}`,
+          "",
+          "Existing members: DM me to verify your wallet.",
+          `Start here: https://t.me/${process.env.BOT_USERNAME}?start=verify`,
+          "",
+          "Unverified members will be removed during the next check.",
+        ].join("\n"),
+      );
+    } catch (err) {
+      console.error("[BOT] /addrule failed:", err);
+      try {
+        await ctx.reply("Something went wrong while adding the rule. Please try again — if this keeps happening, check the bot logs.");
+      } catch (replyErr) {
+        console.error("[BOT] Also failed to notify admin of /addrule error:", replyErr);
+      }
+    }
   });
 
   bot.command("rules", async (ctx) => {
@@ -172,42 +199,55 @@ export function registerSetupCommands(bot: Bot) {
     }
 
     const chatId = ctx.chat!.id.toString();
-    const result = await query(
-      `SELECT r.id, r.collection_id, r.token_id FROM nft_rules r
-       JOIN groups g ON g.id = r.group_id
-       WHERE g.telegram_id = $1 AND r.is_active = true
-       ORDER BY r.created_at`,
-      [chatId],
-    );
 
-    if (result.rows.length === 0 || ruleNumber > result.rows.length) {
-      await ctx.reply("Invalid rule number. Use /rules to see the list.");
-      return;
+    // Wrap DB reads + writes + reply so any DB failure reaches the admin as a
+    // visible error message instead of silently disappearing into grammy's
+    // global error handler.
+    try {
+      const result = await query(
+        `SELECT r.id, r.collection_id, r.token_id FROM nft_rules r
+         JOIN groups g ON g.id = r.group_id
+         WHERE g.telegram_id = $1 AND r.is_active = true
+         ORDER BY r.created_at`,
+        [chatId],
+      );
+
+      if (result.rows.length === 0 || ruleNumber > result.rows.length) {
+        await ctx.reply("Invalid rule number. Use /rules to see the list.");
+        return;
+      }
+
+      const rule = result.rows[ruleNumber - 1];
+
+      await query(`UPDATE nft_rules SET is_active = false WHERE id = $1`, [
+        rule.id,
+      ]);
+
+      const group = await getOrCreateGroup(chatId, ctx.chat!.title || "Unknown");
+      const admin = await syncAdmin(ctx, group.id);
+
+      await query(
+        `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
+        [
+          group.id,
+          admin.id,
+          "RULE_REMOVED",
+          JSON.stringify({
+            collectionId: rule.collection_id,
+            tokenId: rule.token_id,
+          }),
+        ],
+      );
+
+      await ctx.reply(`Rule ${ruleNumber} removed.`);
+    } catch (err) {
+      console.error("[BOT] /removerule failed:", err);
+      try {
+        await ctx.reply("Something went wrong while removing the rule. Please try again — if this keeps happening, check the bot logs.");
+      } catch (replyErr) {
+        console.error("[BOT] Also failed to notify admin of /removerule error:", replyErr);
+      }
     }
-
-    const rule = result.rows[ruleNumber - 1];
-
-    await query(`UPDATE nft_rules SET is_active = false WHERE id = $1`, [
-      rule.id,
-    ]);
-
-    const group = await getOrCreateGroup(chatId, ctx.chat!.title || "Unknown");
-    const admin = await syncAdmin(ctx, group.id);
-
-    await query(
-      `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-      [
-        group.id,
-        admin.id,
-        "RULE_REMOVED",
-        JSON.stringify({
-          collectionId: rule.collection_id,
-          tokenId: rule.token_id,
-        }),
-      ],
-    );
-
-    await ctx.reply(`Rule ${ruleNumber} removed.`);
   });
 
   bot.command("setinterval", async (ctx) => {
@@ -235,14 +275,25 @@ export function registerSetupCommands(bot: Bot) {
     const seconds = Math.round(hours * 3600);
     const chatId = ctx.chat!.id.toString();
 
-    await query(
-      `UPDATE nft_rules SET check_interval_seconds = $1
-       WHERE group_id = (SELECT id FROM groups WHERE telegram_id = $2) AND is_active = true`,
-      [seconds, chatId],
-    );
+    // Wrap DB write + reply so any DB failure reaches the admin as a visible
+    // error instead of silently disappearing into grammy's global error handler.
+    try {
+      await query(
+        `UPDATE nft_rules SET check_interval_seconds = $1
+         WHERE group_id = (SELECT id FROM groups WHERE telegram_id = $2) AND is_active = true`,
+        [seconds, chatId],
+      );
 
-    await ctx.reply(
-      `Re-check interval updated to ${hours} hour(s) for all rules.`,
-    );
+      await ctx.reply(
+        `Re-check interval updated to ${hours} hour(s) for all rules.`,
+      );
+    } catch (err) {
+      console.error("[BOT] /setinterval failed:", err);
+      try {
+        await ctx.reply("Something went wrong while updating the interval. Please try again — if this keeps happening, check the bot logs.");
+      } catch (replyErr) {
+        console.error("[BOT] Also failed to notify admin of /setinterval error:", replyErr);
+      }
+    }
   });
 }

@@ -16,6 +16,31 @@ export async function handleBotAdded(ctx: Context) {
     const addedBy = update.from;
     const chatId = update.chat.id;
 
+    // Verify the user who added the bot is actually an admin of the chat
+    try {
+        const member = await ctx.api.getChatMember(chatId, addedBy.id);
+        if (member.status !== "administrator" && member.status !== "creator") {
+            try {
+                await ctx.api.sendMessage(
+                    chatId,
+                    "Only group admins can add Bouncer. Ask an admin to invite me.",
+                );
+                await ctx.api.leaveChat(chatId);
+            } catch (err) {
+                console.error("[BOT] Failed to leave chat (non-admin adder):", err);
+            }
+            return;
+        }
+    } catch (err) {
+        console.error("[BOT] Failed to verify admin status:", err);
+        try {
+            await ctx.api.leaveChat(chatId);
+        } catch (leaveErr) {
+            console.error("[BOT] Failed to leave chat after verify failure:", leaveErr);
+        }
+        return;
+    }
+
     if (!(await checkBouncerAccess(addedBy.id.toString()))) {
         try {
             await ctx.api.sendMessage(
