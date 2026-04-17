@@ -94,6 +94,11 @@ app.get("/", (req, res) => {
   res.render("landing", { botUsername: process.env.BOT_USERNAME });
 });
 
+// Legal page (privacy policy + terms of use)
+app.get("/legal", (_req, res) => {
+  res.render("legal");
+});
+
 // Routes
 app.use("/auth", authRoutes);
 app.use("/contact", contactRoutes);

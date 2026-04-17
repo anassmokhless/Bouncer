@@ -1,0 +1,167 @@
+<%- include('partials/head', { title: 'Legal — Bouncer' }) %>
+
+<!-- Public nav (same structure as landing / contact) -->
+<nav class="bg-slate-900/80 border-b border-slate-800 backdrop-blur-sm sticky top-0 z-50">
+  <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-2">
+      <a href="/" class="flex items-center gap-2">
+        <img src="/images/logo.png" alt="Bouncer" class="w-8 h-8 rounded-lg">
+        <span class="text-lg font-bold text-cyan-400">Bouncer</span>
+      </a>
+    </div>
+    <div class="flex items-center gap-4">
+      <a href="/contact" class="text-sm text-gray-400 hover:text-cyan-400 transition-colors">Contact</a>
+      <a href="/legal" class="text-sm text-cyan-400 hover:text-cyan-300 transition-colors">Legal</a>
+      <a href="/dashboard" class="bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-cyan-500 transition-colors">Dashboard</a>
+    </div>
+  </div>
+</nav>
+
+<div class="max-w-3xl mx-auto px-4 py-12">
+  <h1 class="text-3xl font-bold text-gray-100 mb-2">Legal</h1>
+  <p class="text-sm text-gray-500 mb-8">Last updated: April 2026</p>
+
+  <!-- Quick links -->
+  <div class="flex gap-4 mb-10 text-sm">
+    <a href="#privacy" class="text-cyan-400 hover:text-cyan-300 transition-colors">Privacy Policy</a>
+    <span class="text-gray-700">·</span>
+    <a href="#terms" class="text-cyan-400 hover:text-cyan-300 transition-colors">Terms of Use</a>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- PRIVACY POLICY                                                -->
+  <!-- ============================================================ -->
+  <section id="privacy" class="mb-16 scroll-mt-20">
+    <h2 class="text-2xl font-bold text-cyan-400 mb-6 pb-2 border-b border-slate-800">Privacy Policy</h2>
+
+    <p class="text-gray-300 leading-relaxed mb-6">
+      Bouncer is a Telegram bot that gates group access using Enjin NFT ownership.
+      This policy describes what data we collect, why, and what you can do about it.
+      We try to keep it short and plain.
+    </p>
+
+    <h3 class="text-lg font-semibold text-gray-100 mt-8 mb-3">What we collect</h3>
+    <ul class="space-y-2 text-gray-400 text-sm list-disc pl-5 leading-relaxed">
+      <li><strong class="text-gray-200">From Telegram:</strong> your Telegram ID, username (if set), and first name. Needed to identify you in groups and on the dashboard.</li>
+      <li><strong class="text-gray-200">From wallet verification:</strong> your Enjin wallet address and the timestamp you linked it. This is the public on-chain address &mdash; we never see private keys.</li>
+      <li><strong class="text-gray-200">Group data:</strong> the Telegram ID and title of each group Bouncer is added to, along with per-member verification status, deadlines, and last-checked times.</li>
+      <li><strong class="text-gray-200">Audit logs:</strong> automated records of verifications, kicks, bans, and admin rule changes, visible to group admins only.</li>
+      <li><strong class="text-gray-200">Session cookies:</strong> when you log into the dashboard, a session cookie keeps you authenticated. Stored server-side, not shared with third parties.</li>
+      <li><strong class="text-gray-200">Contact form submissions:</strong> if you use the contact form, the message and the handle/email you provide are sent to us by email. Not stored in our database.</li>
+    </ul>
+
+    <h3 class="text-lg font-semibold text-gray-100 mt-8 mb-3">How we use it</h3>
+    <ul class="space-y-2 text-gray-400 text-sm list-disc pl-5 leading-relaxed">
+      <li>Check whether you hold the NFT(s) required by a group you're in.</li>
+      <li>Enforce access rules (mute, delete messages, or remove members who don't meet the rules).</li>
+      <li>Show group admins a dashboard of their members, rules, and audit history.</li>
+      <li>Respond to contact form messages.</li>
+    </ul>
+    <p class="text-gray-400 text-sm mt-3">
+      We do <strong class="text-gray-200">not</strong> sell your data, run advertising, or share it with
+      analytics / marketing providers.
+    </p>
+
+    <h3 class="text-lg font-semibold text-gray-100 mt-8 mb-3">Who we share it with</h3>
+    <ul class="space-y-2 text-gray-400 text-sm list-disc pl-5 leading-relaxed">
+      <li><strong class="text-gray-200">Neon</strong> &mdash; our PostgreSQL database provider. Stores everything listed above.</li>
+      <li><strong class="text-gray-200">Telegram</strong> &mdash; we call the Bot API to read group updates and enforce rules.</li>
+      <li><strong class="text-gray-200">Enjin Platform</strong> &mdash; we query their GraphQL API with your wallet address to check NFT ownership. Your wallet address is public on-chain data.</li>
+      <li><strong class="text-gray-200">SMTP provider</strong> &mdash; used only to deliver contact form messages to us.</li>
+    </ul>
+
+    <h3 class="text-lg font-semibold text-gray-100 mt-8 mb-3">Retention</h3>
+    <ul class="space-y-2 text-gray-400 text-sm list-disc pl-5 leading-relaxed">
+      <li>Your wallet link stays until you run <code class="text-cyan-300 bg-slate-900 px-1 rounded">/unlink</code> or request deletion.</li>
+      <li>Audit logs for a group persist until the group is removed from Bouncer.</li>
+      <li>Contact form emails are kept in our inbox as long as needed to respond.</li>
+    </ul>
+
+    <h3 class="text-lg font-semibold text-gray-100 mt-8 mb-3">Your rights</h3>
+    <ul class="space-y-2 text-gray-400 text-sm list-disc pl-5 leading-relaxed">
+      <li>Run <code class="text-cyan-300 bg-slate-900 px-1 rounded">/unlink</code> in a DM with the bot to remove the wallet association.</li>
+      <li>Leave a group at any time &mdash; the bot stops tracking you once you're out.</li>
+      <li>Request full data deletion via the <a href="/contact" class="text-cyan-400 hover:text-cyan-300">contact form</a>.</li>
+      <li>Ask what data we hold on you via the contact form.</li>
+    </ul>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- TERMS OF USE                                                  -->
+  <!-- ============================================================ -->
+  <section id="terms" class="mb-16 scroll-mt-20">
+    <h2 class="text-2xl font-bold text-cyan-400 mb-6 pb-2 border-b border-slate-800">Terms of Use</h2>
+
+    <p class="text-gray-300 leading-relaxed mb-6">
+      By using Bouncer &mdash; either as a group admin who adds the bot, or as a member in
+      a gated group &mdash; you agree to these terms.
+    </p>
+
+    <h3 class="text-lg font-semibold text-gray-100 mt-8 mb-3">The service</h3>
+    <p class="text-gray-400 text-sm leading-relaxed">
+      Bouncer controls access to Telegram groups based on Enjin NFT ownership. Admins
+      configure rules (collection / token / minimum balance). Members verify their
+      wallet to satisfy the rules and keep access.
+    </p>
+
+    <h3 class="text-lg font-semibold text-gray-100 mt-8 mb-3">Eligibility</h3>
+    <ul class="space-y-2 text-gray-400 text-sm list-disc pl-5 leading-relaxed">
+      <li>You need a Telegram account.</li>
+      <li>You must control the Enjin wallet you link &mdash; linking a wallet you don't own is a violation of these terms.</li>
+      <li>To add Bouncer to a group as an admin, you must hold a valid <strong class="text-gray-200">Bouncer MFT</strong> (early access requirement).</li>
+    </ul>
+
+    <h3 class="text-lg font-semibold text-gray-100 mt-8 mb-3">Acceptable use</h3>
+    <ul class="space-y-2 text-gray-400 text-sm list-disc pl-5 leading-relaxed">
+      <li>Don't try to bypass access controls (multi-accounts, spoofed wallets, etc.).</li>
+      <li>Don't abuse the contact form, dashboard, or bot commands.</li>
+      <li>Don't use the service for anything illegal.</li>
+    </ul>
+
+    <h3 class="text-lg font-semibold text-gray-100 mt-8 mb-3">Disclaimers</h3>
+    <ul class="space-y-2 text-gray-400 text-sm list-disc pl-5 leading-relaxed">
+      <li>The service is provided <strong class="text-gray-200">as is</strong>, without warranty of any kind.</li>
+      <li>We don't guarantee uptime. Verification depends on Telegram and the Enjin blockchain &mdash; third-party outages can cause delays or failed checks.</li>
+      <li>We're not responsible for the value, transferability, or state of any NFT.</li>
+      <li>Group admins are responsible for their own rules and the consequences of those rules.</li>
+    </ul>
+
+    <h3 class="text-lg font-semibold text-gray-100 mt-8 mb-3">Termination</h3>
+    <ul class="space-y-2 text-gray-400 text-sm list-disc pl-5 leading-relaxed">
+      <li>We can suspend or revoke access at any time for abuse.</li>
+      <li>You can stop using Bouncer at any time &mdash; unlink your wallet or leave the group.</li>
+    </ul>
+
+    <h3 class="text-lg font-semibold text-gray-100 mt-8 mb-3">Changes</h3>
+    <p class="text-gray-400 text-sm leading-relaxed">
+      These terms may change as the service evolves. Major changes will be announced in
+      the bot or on this page. Continued use after a change means you accept it.
+    </p>
+
+    <h3 class="text-lg font-semibold text-gray-100 mt-8 mb-3">Contact</h3>
+    <p class="text-gray-400 text-sm leading-relaxed">
+      Questions about this policy or these terms? Reach us via the
+      <a href="/contact" class="text-cyan-400 hover:text-cyan-300">contact form</a>.
+    </p>
+  </section>
+
+  <a href="/" class="inline-block text-sm text-cyan-400 hover:text-cyan-300 transition-colors">&larr; Back to home</a>
+</div>
+
+<!-- Footer -->
+<footer class="border-t border-slate-800 mt-8">
+  <div class="max-w-6xl mx-auto px-4 py-6 flex flex-col md:flex-row items-center justify-between gap-4">
+    <div class="flex items-center gap-2">
+      <img src="/images/logo.png" alt="Bouncer" class="w-5 h-5 rounded">
+      <span class="text-sm text-gray-500">Bouncer</span>
+    </div>
+    <div class="flex items-center gap-4">
+      <a href="/" class="text-sm text-gray-500 hover:text-gray-300 transition-colors">Home</a>
+      <a href="/contact" class="text-sm text-gray-500 hover:text-gray-300 transition-colors">Contact</a>
+      <a href="/legal" class="text-sm text-gray-500 hover:text-gray-300 transition-colors">Legal</a>
+      <a href="/dashboard" class="text-sm text-gray-500 hover:text-gray-300 transition-colors">Dashboard</a>
+    </div>
+  </div>
+</footer>
+
+<%- include('partials/footer') %>

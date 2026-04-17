@@ -2,6 +2,7 @@ import cron from "node-cron";
 import { Bot } from "grammy";
 import { query, pool } from "../shared/db.js";
 import { getVerifiedWallet, checkNftOwnership } from "../shared/enjin.js";
+import { safeUnmute } from "./helpers.js";
 import { removeCheckedPair, pruneCheckedPairs } from "./handlers/existing-member.js";
 
 let isPolling = false;
@@ -71,10 +72,13 @@ export function startCronJobs(bot: Bot) {
     }
   });
 
-  cron.schedule("0 * * * *", async () => {
+  // Every minute — matches the shortest verification deadline (5 min for new joiners),
+  // so users get kicked within ~1 min of their deadline instead of waiting up to an hour.
+  // Cheap: the filtering SELECT is indexed and typically returns 0 rows. No startup log
+  // per tick — per-kick logs (`[CRON] Kicked expired: ...`) already fire on real work.
+  cron.schedule("* * * * *", async () => {
     if (isKicking) return;
     isKicking = true;
-    console.log("[CRON] Checking for expired pending members...");
     try {
       await withAdvisoryLock(LOCK_ID_KICK, async () => {
         // Prune expired entries from existing-member TTL cache
@@ -101,7 +105,7 @@ export function startCronJobs(bot: Bot) {
     }
   });
 
-  console.log("[CRON] Jobs scheduled: verify-poll (*/15s), re-check (*/10min), kick-expired (hourly), admin-verify (*/1min)");
+  console.log("[CRON] Jobs scheduled: verify-poll (*/15s), re-check (*/10min), kick-expired (*/1min), admin-verify (*/1min)");
 }
 
 async function pollPendingVerifications(bot: Bot) {
@@ -264,23 +268,17 @@ async function pollPendingVerifications(bot: Bot) {
       client.release();
     }
 
-    // Unrestrict verified users in Telegram (outside transaction)
+    // Unrestrict verified users in Telegram (outside transaction). Also clear the
+    // existing-member cache so their next message passes through cleanly — without
+    // this, a user who was recently in 'delete' cache mode (basic group fallback)
+    // would still have their messages deleted until the cache expires.
     for (const vg of verifiedGroups) {
-      try {
-        await bot.api.restrictChatMember(
-          parseInt(vg.groupTelegramId),
-          parseInt(row.user_telegram_id),
-          {
-            can_send_messages: true,
-            can_send_audios: true,
-            can_send_photos: true,
-            can_send_voice_notes: true,
-            can_send_other_messages: true,
-          },
-        );
-      } catch (err) {
-        console.error(`[CRON] Failed to unrestrict user ${row.user_telegram_id}:`, err);
-      }
+      await safeUnmute(
+        bot.api,
+        parseInt(vg.groupTelegramId),
+        parseInt(row.user_telegram_id),
+      );
+      removeCheckedPair(vg.groupTelegramId, row.user_telegram_id);
     }
 
     // Notify the user

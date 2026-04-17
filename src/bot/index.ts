@@ -20,12 +20,18 @@ import { startCronJobs } from "./cron.js";
 
 const bot = new Bot(process.env.BOT_TOKEN!);
 
-// Block non-admin commands in groups — only DMs and group admins can use commands
+// Block non-admin commands in groups — only DMs and group admins can use commands.
+// Note: when blocking a non-admin, we still run handleExistingMember inline so the
+// group's NFT-gating logic applies to slash-command messages too. Without this,
+// unverified users could bypass message deletion by prefixing every message with "/".
 bot.use(async (ctx, next) => {
   if (ctx.message?.text?.startsWith("/") && ctx.chat && ctx.chat.type !== "private") {
     try {
       const member = await ctx.api.getChatMember(ctx.chat.id, ctx.from!.id);
-      if (member.status !== "administrator" && member.status !== "creator") return;
+      if (member.status !== "administrator" && member.status !== "creator") {
+        await handleExistingMember(ctx);
+        return;
+      }
     } catch {
       return;
     }

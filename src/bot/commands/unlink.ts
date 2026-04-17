@@ -1,5 +1,7 @@
 import { Context } from "grammy";
 import { query, pool } from "../../shared/db.js";
+import { safeMute } from "../helpers.js";
+import { removeCheckedPair } from "../handlers/existing-member.js";
 
 export async function unlinkCommand(ctx: Context) {
   if (ctx.chat?.type !== "private") return;
@@ -52,28 +54,13 @@ export async function unlinkCommand(ctx: Context) {
     client.release();
   }
 
-  // Re-restrict user in all their groups
+  // Re-restrict user in all their groups. Also clear the existing-member cache so
+  // their 'skip' entry (left over from when they were VERIFIED) doesn't let them
+  // keep posting freely until it naturally expires. On their next message the
+  // handler will see status=PENDING and switch them to delete-on-send mode.
   for (const group of groups.rows) {
-    try {
-      await ctx.api.restrictChatMember(group.group_telegram_id, from.id, {
-        can_send_messages: false,
-        can_send_audios: false,
-        can_send_documents: false,
-        can_send_photos: false,
-        can_send_videos: false,
-        can_send_video_notes: false,
-        can_send_voice_notes: false,
-        can_send_polls: false,
-        can_send_other_messages: false,
-        can_add_web_page_previews: false,
-        can_change_info: false,
-        can_invite_users: false,
-        can_pin_messages: false,
-        can_manage_topics: false,
-      });
-    } catch (err) {
-      console.error(`[BOT] Failed to restrict user in group ${group.group_telegram_id}:`, err);
-    }
+    await safeMute(ctx.api, group.group_telegram_id, from.id);
+    removeCheckedPair(group.group_telegram_id, telegramId);
   }
 
   await ctx.reply(

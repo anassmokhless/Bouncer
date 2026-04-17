@@ -1,7 +1,7 @@
 import { Context } from "grammy";
 import { query } from "../../shared/db.js";
 import { checkNftOwnership } from "../../shared/enjin.js";
-import { getOrCreateGroup, getOrCreateUser } from "../helpers.js";
+import { getOrCreateGroup, getOrCreateUser, safeMute, safeUnmute } from "../helpers.js";
 
 export async function handleNewMembers(ctx: Context) {
   const newMembers = ctx.message?.new_chat_members;
@@ -35,27 +35,10 @@ export async function handleNewMembers(ctx: Context) {
         return;
       }
 
-      // Restrict user immediately — mute until verified
-      try {
-        await ctx.api.restrictChatMember(ctx.chat!.id, member.id, {
-          can_send_messages: false,
-          can_send_audios: false,
-          can_send_documents: false,
-          can_send_photos: false,
-          can_send_videos: false,
-          can_send_video_notes: false,
-          can_send_voice_notes: false,
-          can_send_polls: false,
-          can_send_other_messages: false,
-          can_add_web_page_previews: false,
-          can_change_info: false,
-          can_invite_users: false,
-          can_pin_messages: false,
-          can_manage_topics: false,
-        });
-      } catch (err) {
-        console.error("[BOT] Failed to restrict member:", err);
-      }
+      // Restrict user immediately — mute until verified. In basic groups (not
+      // supergroups) muting isn't supported and silently no-ops; any messages
+      // they send will be deleted on sight by handleExistingMember instead.
+      await safeMute(ctx.api, ctx.chat!.id, member.id);
 
       // If user has a wallet, check NFT immediately
       let verified = false;
@@ -87,18 +70,9 @@ export async function handleNewMembers(ctx: Context) {
               [group.id, user.id, "USER_AUTO_VERIFIED", JSON.stringify({ collectionId: rule.collection_id })],
             );
 
-            // Unrestrict — user has the NFT
-            try {
-              await ctx.api.restrictChatMember(ctx.chat!.id, member.id, {
-                can_send_messages: true,
-                can_send_audios: true,
-                can_send_photos: true,
-                can_send_voice_notes: true,
-                can_send_other_messages: true,
-              });
-            } catch (err) {
-              console.error("[BOT] Failed to unrestrict member:", err);
-            }
+            // Unrestrict — user has the NFT. No-op in basic groups (they were
+            // never muted there to begin with).
+            await safeUnmute(ctx.api, ctx.chat!.id, member.id);
 
             break;
           }
@@ -116,17 +90,7 @@ export async function handleNewMembers(ctx: Context) {
           );
           if (existing.rows.length > 0 && existing.rows[0].status === "VERIFIED") {
             // Preserve VERIFIED — unrestrict and let recheck cron revalidate
-            try {
-              await ctx.api.restrictChatMember(ctx.chat!.id, member.id, {
-                can_send_messages: true,
-                can_send_audios: true,
-                can_send_photos: true,
-                can_send_voice_notes: true,
-                can_send_other_messages: true,
-              });
-            } catch (err) {
-              console.error("[BOT] Failed to unrestrict preserved VERIFIED member:", err);
-            }
+            await safeUnmute(ctx.api, ctx.chat!.id, member.id);
             console.log(`[BOT] Preserved VERIFIED for ${telegramId} — Enjin API errored on all rules`);
             return;
           }
@@ -134,19 +98,19 @@ export async function handleNewMembers(ctx: Context) {
 
         await query(
           `INSERT INTO members (group_id, user_id, status, verification_deadline)
-           VALUES ($1, $2, 'PENDING', now() + interval '1 hour')
-           ON CONFLICT (group_id, user_id) DO UPDATE SET status = 'PENDING', verification_deadline = now() + interval '1 hour'`,
+           VALUES ($1, $2, 'PENDING', now() + interval '5 minutes')
+           ON CONFLICT (group_id, user_id) DO UPDATE SET status = 'PENDING', verification_deadline = now() + interval '5 minutes'`,
           [group.id, user.id],
         );
 
         try {
-          await ctx.api.sendMessage(ctx.chat!.id, [
+          await ctx.reply([
             `Welcome ${member.first_name}! Access to this group requires an Enjin NFT.`,
             "",
-            "You are muted until you verify your wallet.",
-            `DM me to verify: [Start verification](https://t.me/${process.env.BOT_USERNAME}?start=verify)`,
+            "Your messages will be removed until you verify your wallet.",
+            `[Start verification](https://t.me/${process.env.BOT_USERNAME}?start=verify)`,
             "",
-            "You have 1 hour to verify or you'll be removed.",
+            "You have 5 minutes to verify or you'll be removed.",
           ].join("\n"), { parse_mode: "Markdown" });
         } catch (err) {
           console.error("[BOT] Failed to send welcome message:", err);
