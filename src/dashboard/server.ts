@@ -16,6 +16,7 @@ import { pool } from "../shared/db.js";
 import authRoutes from "./routes/auth.js";
 import groupsRoutes from "./routes/groups.js";
 import auditRoutes from "./routes/audit.js";
+import contactRoutes from "./routes/contact.js";
 
 const app = express();
 const PgStore = connectPgSimple(session);
@@ -88,11 +89,14 @@ app.get("/login", (req, res) => {
   res.render("login", { botUsername: process.env.BOT_USERNAME, isDev: process.env.NODE_ENV !== "production" });
 });
 
-// Root redirect
-app.get("/", (req, res) => res.redirect("/dashboard"));
+// Landing page
+app.get("/", (req, res) => {
+  res.render("landing", { botUsername: process.env.BOT_USERNAME });
+});
 
 // Routes
 app.use("/auth", authRoutes);
+app.use("/contact", contactRoutes);
 app.use("/dashboard/audit", auditRoutes);
 app.use("/dashboard", groupsRoutes);
 

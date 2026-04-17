@@ -1,0 +1,92 @@
+<%- include('partials/head', { title: 'Contact — Bouncer' }) %>
+
+<!-- Contact nav (public, no user session) -->
+<nav class="bg-slate-900/80 border-b border-slate-800 backdrop-blur-sm sticky top-0 z-50">
+  <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-2">
+      <a href="/" class="flex items-center gap-2">
+        <img src="/images/logo.png" alt="Bouncer" class="w-8 h-8 rounded-lg">
+        <span class="text-lg font-bold text-cyan-400">Bouncer</span>
+      </a>
+    </div>
+    <div class="flex items-center gap-4">
+      <a href="/" class="text-sm text-gray-400 hover:text-cyan-400 transition-colors">Home</a>
+      <a href="/dashboard" class="bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-cyan-500 transition-colors">Dashboard</a>
+    </div>
+  </div>
+</nav>
+
+<div class="max-w-lg mx-auto px-4 py-16">
+  <h1 class="text-2xl font-bold text-gray-100 mb-2">Contact Us</h1>
+  <p class="text-gray-400 mb-8">Have a question or need help? Send us a message and we'll get back to you.</p>
+
+  <% if (success) { %>
+    <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-6 text-center">
+      <svg class="w-12 h-12 text-emerald-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+      </svg>
+      <h2 class="text-lg font-semibold text-emerald-400 mb-1">Message sent!</h2>
+      <p class="text-gray-400 text-sm">We'll get back to you as soon as possible.</p>
+      <a href="/" class="inline-block mt-4 text-sm text-cyan-400 hover:text-cyan-300 transition-colors">&larr; Back to home</a>
+    </div>
+  <% } else { %>
+    <% if (error) { %>
+      <div class="bg-red-500/10 border border-red-500/30 rounded-xl p-4 mb-6">
+        <p class="text-red-400 text-sm"><%= error %></p>
+      </div>
+    <% } %>
+
+    <form action="/contact" method="POST" class="space-y-5">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+
+      <div>
+        <label for="telegram" class="block text-sm font-medium text-gray-300 mb-1.5">Telegram @</label>
+        <input type="text" id="telegram" name="telegram" placeholder="@username" required
+               class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-cyan-500 transition-colors">
+      </div>
+
+      <div>
+        <label for="email" class="block text-sm font-medium text-gray-300 mb-1.5">Email</label>
+        <input type="email" id="email" name="email" placeholder="you@example.com" required
+               class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-cyan-500 transition-colors">
+      </div>
+
+      <div>
+        <label for="role" class="block text-sm font-medium text-gray-300 mb-1.5">I am a...</label>
+        <select id="role" name="role" required
+                class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-gray-100 focus:outline-none focus:border-cyan-500 transition-colors appearance-none">
+          <option value="" disabled selected>Select your role</option>
+          <option value="admin">Group Admin</option>
+          <option value="user">Group Member</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="message" class="block text-sm font-medium text-gray-300 mb-1.5">Message</label>
+        <textarea id="message" name="message" rows="5" placeholder="How can we help?" required
+                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-cyan-500 transition-colors resize-y"></textarea>
+      </div>
+
+      <button type="submit"
+              class="w-full bg-cyan-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-cyan-500 transition-colors shadow-lg shadow-cyan-500/20">
+        Send Message
+      </button>
+    </form>
+  <% } %>
+</div>
+
+<!-- Footer -->
+<footer class="border-t border-slate-800 mt-8">
+  <div class="max-w-6xl mx-auto px-4 py-6 flex flex-col md:flex-row items-center justify-between gap-4">
+    <div class="flex items-center gap-2">
+      <img src="/images/logo.png" alt="Bouncer" class="w-5 h-5 rounded">
+      <span class="text-sm text-gray-500">Bouncer</span>
+    </div>
+    <div class="flex items-center gap-4">
+      <a href="/" class="text-sm text-gray-500 hover:text-gray-300 transition-colors">Home</a>
+      <a href="/dashboard" class="text-sm text-gray-500 hover:text-gray-300 transition-colors">Dashboard</a>
+    </div>
+  </div>
+</footer>
+
+<%- include('partials/footer') %>
