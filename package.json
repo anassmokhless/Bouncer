@@ -18,6 +18,7 @@
     "dotenv": "^17.4.1",
     "ejs": "^5.0.1",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.3.2",
     "express-session": "^1.19.0",
     "grammy": "^1.42.0",
     "graphql": "^16.13.2",

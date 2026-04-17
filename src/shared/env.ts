@@ -10,6 +10,11 @@ const REQUIRED_VARS = [
   "DATABASE_URL",
   "ENJIN_API_URL",
   "SESSION_SECRET",
+  // Contact form SMTP — fail fast so /contact doesn't 500 silently on first submit.
+  "SMTP_HOST",
+  "SMTP_USER",
+  "SMTP_PASS",
+  "CONTACT_EMAIL",
 ] as const;
 
 export function validateEnv() {

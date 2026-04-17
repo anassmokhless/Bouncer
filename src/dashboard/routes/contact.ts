@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import nodemailer from "nodemailer";
+import rateLimit from "express-rate-limit";
 
 const router = Router();
 
@@ -13,11 +14,27 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+// Rate limit contact form submissions — the form is public and wired to SMTP, so
+// without this a bot could spam the inbox and get the SMTP account blacklisted.
+// Applied to POST only so legitimate users can still load/refresh the form.
+const contactLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  limit: 5, // 5 submissions per IP per window
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  handler: (_req, res) => {
+    res.status(429).render("contact", {
+      success: false,
+      error: "Too many messages sent from this address. Please try again in a few minutes.",
+    });
+  },
+});
+
 router.get("/", (_req: Request, res: Response) => {
   res.render("contact", { success: false, error: null });
 });
 
-router.post("/", async (req: Request, res: Response) => {
+router.post("/", contactLimiter, async (req: Request, res: Response) => {
   const { telegram, email, role, message, _csrf } = req.body;
 
   // Validate required fields
@@ -35,6 +52,16 @@ router.post("/", async (req: Request, res: Response) => {
   // Basic email format check
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     res.render("contact", { success: false, error: "Please enter a valid email address." });
+    return;
+  }
+
+  // Validate Telegram username format: optional @, 5–32 chars, letters/digits/underscore.
+  // This also prevents email header injection via CR/LF in the subject line.
+  if (!/^@?[a-zA-Z0-9_]{5,32}$/.test(telegram)) {
+    res.render("contact", {
+      success: false,
+      error: "Please enter a valid Telegram username (5–32 letters, digits, or underscores).",
+    });
     return;
   }
 
