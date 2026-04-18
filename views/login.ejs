@@ -6,17 +6,27 @@
     <h1 class="text-2xl font-bold text-cyan-400 mb-2">Bouncer</h1>
     <p class="text-sm text-gray-400 mb-6">Sign in with your Telegram account to manage your groups.</p>
 
-    <!-- Telegram Login Widget. Embedded as a static <script> (not dynamically
-         appended) because the widget reads its data-attributes synchronously at
-         load time and some browsers don't reliably propagate attributes set
-         via JS before append when the script is async. -->
+    <!-- Telegram Login Widget — using data-onauth (JS callback via postMessage)
+         instead of data-auth-url (popup → redirect). data-auth-url is less
+         reliable: Telegram's popup sometimes closes before the redirect lands,
+         causing nginx 499s and no auth data reaching the server. data-onauth
+         hands us the auth blob directly in the parent window, which we then
+         pass to the same GET /auth/telegram/callback route. -->
     <div class="flex justify-center mb-4">
       <script async src="https://telegram.org/js/telegram-widget.js?22"
               data-telegram-login="<%= botUsername %>"
               data-size="large"
-              data-auth-url="<%= authUrl %>"
+              data-onauth="onTelegramAuth(user)"
               data-request-access="write"></script>
     </div>
+    <script>
+      function onTelegramAuth(user) {
+        // The widget hands us { id, first_name, username, photo_url, auth_date, hash }.
+        // Forward as query params to the existing callback route — unchanged server-side.
+        const qs = new URLSearchParams(user).toString();
+        window.location.href = '/auth/telegram/callback?' + qs;
+      }
+    </script>
 
     <% if (isDev) { %>
       <hr class="my-4 border-slate-700">

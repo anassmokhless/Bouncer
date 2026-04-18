@@ -80,20 +80,18 @@ app.use((req, res, next) => {
   next();
 });
 
-// Login page. We build the absolute callback URL server-side and pass it to
-// the template so the Telegram widget's data-auth-url is a concrete string at
-// HTML parse time — no JS-side resolution needed. Relies on trust proxy being
-// set correctly so req.protocol is "https" behind nginx.
+// Login page. Telegram widget uses data-onauth (JS callback) instead of
+// data-auth-url — the widget calls a JS function with the auth blob, which
+// we then redirect to /auth/telegram/callback with the params in the query
+// string. Avoids the popup-redirect quirk that was causing 499s in nginx.
 app.get("/login", (req, res) => {
   if (req.session.user) {
     res.redirect("/dashboard");
     return;
   }
-  const authUrl = `${req.protocol}://${req.get("host")}/auth/telegram/callback`;
   res.render("login", {
     botUsername: process.env.BOT_USERNAME,
     isDev: process.env.NODE_ENV !== "production",
-    authUrl,
   });
 });
 
