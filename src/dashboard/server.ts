@@ -46,6 +46,12 @@ app.use(
         imgSrc: ["'self'", "data:"],
       },
     },
+    // Helmet's default COOP is "same-origin", which breaks cross-origin popup
+    // postMessage — specifically, the Telegram Login Widget's popup on
+    // oauth.telegram.org can't send auth data back to the parent window here.
+    // "same-origin-allow-popups" keeps opener isolation for non-popup pages but
+    // allows popups we open to communicate back. Required for the widget.
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
   }),
 );
 app.use(express.static(path.resolve(import.meta.dirname, "../../public")));
