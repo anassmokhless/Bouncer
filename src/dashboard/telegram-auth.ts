@@ -4,6 +4,12 @@ import { query } from "../shared/db.js";
 interface TelegramLoginData {
   id: string;
   first_name?: string;
+  // Telegram's Login Widget includes last_name in the signed payload whenever
+  // the user has one set on their profile. We MUST forward it into the HMAC
+  // check-string even though we never persist it — otherwise users with a last
+  // name get "Invalid Telegram login" on every attempt. verifyTelegramLogin
+  // filters out undefined keys, so users without a last name are unaffected.
+  last_name?: string;
   username?: string;
   photo_url?: string;
   auth_date: string;
