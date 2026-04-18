@@ -80,13 +80,21 @@ app.use((req, res, next) => {
   next();
 });
 
-// Login page
+// Login page. We build the absolute callback URL server-side and pass it to
+// the template so the Telegram widget's data-auth-url is a concrete string at
+// HTML parse time — no JS-side resolution needed. Relies on trust proxy being
+// set correctly so req.protocol is "https" behind nginx.
 app.get("/login", (req, res) => {
   if (req.session.user) {
     res.redirect("/dashboard");
     return;
   }
-  res.render("login", { botUsername: process.env.BOT_USERNAME, isDev: process.env.NODE_ENV !== "production" });
+  const authUrl = `${req.protocol}://${req.get("host")}/auth/telegram/callback`;
+  res.render("login", {
+    botUsername: process.env.BOT_USERNAME,
+    isDev: process.env.NODE_ENV !== "production",
+    authUrl,
+  });
 });
 
 // Landing page
