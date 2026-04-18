@@ -36,7 +36,11 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "https://telegram.org"],
+        // 'unsafe-eval' is required for the Telegram Login Widget's data-onauth
+        // mechanism: the widget compiles the onauth attribute string into a
+        // Function() to invoke with the auth blob. Without it, the widget
+        // fails to render at all.
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://telegram.org"],
         scriptSrcAttr: ["'unsafe-inline'"],
         frameSrc: ["'self'", "https://oauth.telegram.org"],
         imgSrc: ["'self'", "data:"],
