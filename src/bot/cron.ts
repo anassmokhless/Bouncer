@@ -27,7 +27,15 @@ async function withAdvisoryLock(lockId: number, fn: () => Promise<void>): Promis
   const client = await pool.connect();
   try {
     const result = await client.query(`SELECT pg_try_advisory_lock($1) AS locked`, [lockId]);
-    if (!result.rows[0].locked) return; // Another instance holds it — skip this tick.
+    if (!result.rows[0].locked) {
+      // Another instance holds it — skip this tick. Logged as a warning because
+      // in a single-instance deployment this should essentially never happen; if
+      // it does, it usually signals a connection-pooler quirk (see pg_advisory
+      // lock + pooler interactions) or a stuck lock from a prior session, not
+      // a legitimate "another bot is doing work" scenario.
+      console.warn(`[CRON] Advisory lock ${lockId} unavailable — skipping tick`);
+      return;
+    }
     try {
       await fn();
     } finally {
