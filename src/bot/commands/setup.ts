@@ -22,7 +22,16 @@ async function isAuthorizedAdmin(ctx: Context): Promise<boolean> {
     return false;
   }
 
-  if (!(await checkBouncerAccess(ctx.from.id.toString()))) {
+  const access = await checkBouncerAccess(ctx.from.id.toString());
+  if (access === null) {
+    // API error — can't confirm the admin has the pass, but shouldn't lock them
+    // out permanently. Tell them to retry; the next command attempt will re-check.
+    await ctx.reply(
+      "Couldn't verify your Bouncer Pass right now. Please try again in a moment.",
+    );
+    return false;
+  }
+  if (!access) {
     await ctx.reply(
       "You need a Bouncer Pass NFT to use admin commands. DM me and run /verify to link your wallet.",
     );

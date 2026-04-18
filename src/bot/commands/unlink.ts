@@ -33,9 +33,11 @@ export async function unlinkCommand(ctx: Context) {
 
   // Count how many groups this user administers. If they're responsible for any,
   // we'll start a 5-minute admin-verify countdown — leaveUnverifiedGroups checks
-  // Bouncer Pass ownership when the deadline expires.
+  // Bouncer Pass ownership (across ALL admins of each group) when the deadline
+  // expires. Uses group_admins (many-to-many source of truth) rather than the
+  // legacy groups.admin_user_id single-admin field, so co-admins are counted too.
   const adminGroupsResult = await query(
-    `SELECT COUNT(*)::int AS count FROM groups WHERE admin_user_id = $1`,
+    `SELECT COUNT(*)::int AS count FROM group_admins WHERE user_id = $1`,
     [user.id],
   );
   const adminGroupCount: number = adminGroupsResult.rows[0].count;
@@ -54,12 +56,13 @@ export async function unlinkCommand(ctx: Context) {
       [user.id],
     );
     // Start the 5-minute admin-verify countdown on every group this user administers.
-    // If they re-verify with a Bouncer-Pass-holding wallet before the deadline,
-    // leaveUnverifiedGroups clears the deadline. Otherwise it leaves those groups.
+    // leaveUnverifiedGroups checks ALL admins of each group when the deadline fires,
+    // so if a co-admin still holds the pass the deadline is cleared and the group
+    // stays. Otherwise the group is left.
     if (adminGroupCount > 0) {
       await client.query(
         `UPDATE groups SET admin_verify_deadline = now() + interval '5 minutes'
-         WHERE admin_user_id = $1`,
+         WHERE id IN (SELECT group_id FROM group_admins WHERE user_id = $1)`,
         [user.id],
       );
     }

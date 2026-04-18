@@ -129,7 +129,13 @@ export async function getOrCreateUser(telegramId: string,username?: string,first
 }
 
 //check if a user holds the bouncer pass by telegram id
-export async function checkBouncerAccess(telegramId: string): Promise<boolean> {
+// Inherits the tri-state semantics of hasBouncerPass:
+//   true  — user has linked a wallet that holds the pass
+//   false — user has no wallet, or wallet definitively lacks the pass
+//   null  — couldn't determine right now (Enjin API error). Callers must NOT
+//           treat null as false for destructive decisions (leaving groups,
+//           refusing commands with no retry path, etc.).
+export async function checkBouncerAccess(telegramId: string): Promise<boolean | null> {
   if (!process.env.BOUNCER_COLLECTION_ID) return true; // early access disabled
 
   const user = await query(
@@ -137,6 +143,6 @@ export async function checkBouncerAccess(telegramId: string): Promise<boolean> {
     [telegramId],
   );
 
-  if (!user.rows[0]?.wallet_address) return false;
+  if (!user.rows[0]?.wallet_address) return false; // definitive no — no wallet to check
   return hasBouncerPass(user.rows[0].wallet_address);
 }

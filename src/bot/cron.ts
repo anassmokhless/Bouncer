@@ -9,6 +9,7 @@ let isPolling = false;
 let isRechecking = false;
 let isKicking = false;
 let isLeaving = false;
+let isAdminRechecking = false;
 
 // Cross-process coordination via PostgreSQL advisory locks.
 // The in-memory flags above prevent overlapping runs within a single Node process.
@@ -20,6 +21,7 @@ const LOCK_ID_POLL = 1001;
 const LOCK_ID_RECHECK = 1002;
 const LOCK_ID_KICK = 1003;
 const LOCK_ID_LEAVE = 1004;
+const LOCK_ID_ADMIN_RECHECK = 1005;
 
 async function withAdvisoryLock(lockId: number, fn: () => Promise<void>): Promise<void> {
   const client = await pool.connect();
@@ -105,7 +107,24 @@ export function startCronJobs(bot: Bot) {
     }
   });
 
-  console.log("[CRON] Jobs scheduled: verify-poll (*/15s), re-check (*/10min), kick-expired (*/1min), admin-verify (*/1min)");
+  // Periodic admin Pass-ownership sweep — every 5 minutes. Catches admins who
+  // transferred/sold their Bouncer Pass without running /unlink. Arms the 5-min
+  // admin_verify_deadline on groups where NO admin currently holds the pass;
+  // leaveUnverifiedGroups (the */1min cron above) does the actual kick once the
+  // deadline fires, giving admins a grace window to re-acquire the pass.
+  cron.schedule("*/5 * * * *", async () => {
+    if (isAdminRechecking) return;
+    isAdminRechecking = true;
+    try {
+      await withAdvisoryLock(LOCK_ID_ADMIN_RECHECK, () => recheckAdminPassOwnership(bot));
+    } catch (err) {
+      console.error("[CRON] Admin pass recheck failed:", err);
+    } finally {
+      isAdminRechecking = false;
+    }
+  });
+
+  console.log("[CRON] Jobs scheduled: verify-poll (*/15s), re-check (*/10min), kick-expired (*/1min), admin-verify (*/1min), admin-recheck (*/5min)");
 }
 
 async function pollPendingVerifications(bot: Bot) {
@@ -498,44 +517,72 @@ async function kickExpiredPendingMembers(bot: Bot) {
 }
 
 async function leaveUnverifiedGroups(bot: Bot) {
-  // Two triggers for admin_verify_deadline being set:
-  //   1. bot-added.ts — admin hasn't linked a wallet yet (initial 5-min window)
-  //   2. unlink.ts — admin ran /unlink and now has 5 min to re-verify with a Bouncer Pass
+  // Triggers for admin_verify_deadline being set:
+  //   1. bot-added.ts — adder hasn't linked a wallet yet (initial 5-min window)
+  //   2. unlink.ts — an admin ran /unlink; groups they admin get 5 min to re-verify
+  //   3. recheckAdminPassOwnership cron — periodic sweep finds a group with no
+  //      pass-holding admins and arms the deadline (Fix #2)
   //
-  // For each group whose deadline has passed, check if the admin currently holds a
-  // Bouncer Pass. If yes, clear the deadline (admin verified in time). If not
-  // (no wallet OR wallet doesn't hold the MFT), leave the group.
+  // A group is safe as long as AT LEAST ONE of its group_admins holds the pass.
+  // This is the multi-admin fix: the original code only checked groups.admin_user_id
+  // (the single first-adder), ignoring co-admins who might still hold the pass.
   //
-  // Note: we keep admin_user_id permanent so we can find this admin's groups again
-  // if they /unlink later. Only admin_verify_deadline gets cleared.
+  // Null handling: if the Enjin API errors on EVERY admin we can't fairly decide,
+  // so we skip the tick and let the deadline stay armed for a retry. If we get at
+  // least one clean result and none are `true`, the group genuinely has no
+  // pass-holding admin and we leave.
+  //
+  // admin_user_id is kept as provenance (first-adder) but no longer load-bearing.
   const result = await query(
-    `SELECT g.id, g.telegram_id, g.admin_user_id, u.wallet_address
+    `SELECT g.id, g.telegram_id
      FROM groups g
-     LEFT JOIN users u ON u.id = g.admin_user_id
      WHERE g.admin_verify_deadline IS NOT NULL
        AND g.admin_verify_deadline < now()`,
   );
 
   for (const row of result.rows) {
-    // Check if admin currently holds a Bouncer Pass. hasBouncerPass returns true
-    // when BOUNCER_COLLECTION_ID is unset (early access disabled), so this degrades
-    // to "does admin have any wallet?" in that mode.
-    const adminHasMft = row.wallet_address
-      ? await hasBouncerPass(row.wallet_address)
-      : false;
+    const admins = await query(
+      `SELECT u.wallet_address
+       FROM group_admins ga
+       JOIN users u ON u.id = ga.user_id
+       WHERE ga.group_id = $1 AND u.wallet_address IS NOT NULL`,
+      [row.id],
+    );
 
-    if (adminHasMft) {
-      // Admin re-verified with a valid wallet in time — clear the deadline, keep the row.
+    let anyHolds = false;
+    let sawCleanResult = false;
+
+    for (const admin of admins.rows) {
+      const passResult = await hasBouncerPass(admin.wallet_address);
+      if (passResult === null) continue; // API error — try the next admin
+      sawCleanResult = true;
+      if (passResult === true) {
+        anyHolds = true;
+        break;
+      }
+    }
+
+    if (anyHolds) {
+      // At least one admin holds the pass — clear the deadline, keep the group.
       await query(`UPDATE groups SET admin_verify_deadline = NULL WHERE id = $1`, [row.id]);
       continue;
     }
 
-    // Admin failed to re-verify — leave the group and delete the DB row.
+    if (admins.rows.length > 0 && !sawCleanResult) {
+      // Every admin check errored — can't fairly decide, skip this tick and retry next minute.
+      console.warn(
+        `[CRON] Skipping leave check for group ${row.telegram_id} — every admin pass check errored`,
+      );
+      continue;
+    }
+
+    // No admins with wallets OR at least one clean `false` with zero `true`:
+    // no admin holds the pass. Leave the group and delete the DB row.
     // Cascade removes group_admins, nft_rules, members, audit_logs.
     try {
       await bot.api.sendMessage(
         parseInt(row.telegram_id),
-        "Admin did not verify a Bouncer Pass in time. Leaving group.",
+        "No admin has a valid Bouncer Pass. Leaving group.",
       );
       await bot.api.leaveChat(parseInt(row.telegram_id));
     } catch (err) {
@@ -544,6 +591,94 @@ async function leaveUnverifiedGroups(bot: Bot) {
 
     await query(`DELETE FROM groups WHERE id = $1`, [row.id]);
 
-    console.log(`[CRON] Left group ${row.telegram_id} — admin did not verify with Bouncer Pass`);
+    console.log(`[CRON] Left group ${row.telegram_id} — no admin holds a Bouncer Pass`);
+  }
+}
+
+// Periodic sweep: for every active group with NO currently-armed
+// admin_verify_deadline, verify that at least one admin still holds the
+// Bouncer Pass. If none do, arm the 5-min deadline — leaveUnverifiedGroups
+// will enforce the eventual kick. Catches the "admin transferred their pass
+// without /unlink'ing" case that the original early-access system missed.
+//
+// Why arm instead of leaving immediately: admins deserve the same 5-min grace
+// window that the /unlink and bot-added flows give. This keeps enforcement
+// consistent across all triggers.
+//
+// Why guard on `admin_verify_deadline IS NULL`: if a deadline is already
+// running (set by /unlink, bot-added, or a prior recheck cycle), we don't want
+// to reset it to a newer timestamp — that would extend their grace window
+// forever as long as we keep detecting them as Pass-less. The existing
+// countdown will fire on its own schedule.
+//
+// Null handling mirrors leaveUnverifiedGroups: if every admin check errored,
+// skip this group this cycle and retry next 5-minute tick.
+async function recheckAdminPassOwnership(_bot: Bot) {
+  // No-op in open-access mode — no pass exists to check against. Saves a DB
+  // query + Enjin API round-trips every 5 minutes.
+  if (!process.env.BOUNCER_COLLECTION_ID) return;
+
+  const groups = await query(
+    `SELECT id, telegram_id
+     FROM groups
+     WHERE is_active = true
+       AND admin_verify_deadline IS NULL`,
+  );
+
+  let armedCount = 0;
+
+  for (const group of groups.rows) {
+    const admins = await query(
+      `SELECT u.wallet_address
+       FROM group_admins ga
+       JOIN users u ON u.id = ga.user_id
+       WHERE ga.group_id = $1 AND u.wallet_address IS NOT NULL`,
+      [group.id],
+    );
+
+    let anyHolds = false;
+    let sawCleanResult = false;
+
+    for (const admin of admins.rows) {
+      const passResult = await hasBouncerPass(admin.wallet_address);
+      if (passResult === null) continue;
+      sawCleanResult = true;
+      if (passResult === true) {
+        anyHolds = true;
+        break;
+      }
+    }
+
+    if (anyHolds) continue; // at least one admin still holds — nothing to do
+
+    if (admins.rows.length > 0 && !sawCleanResult) {
+      // Every admin check errored this cycle — can't fairly decide, try again
+      // in 5 minutes. This group either has a real problem (all admins lack
+      // the pass) or Enjin is flaky; either way, don't arm a deadline on
+      // unreliable data.
+      continue;
+    }
+
+    // No admin holds the pass (either zero wallets to check, or at least one
+    // clean `false` and zero `true`). Arm the deadline — but only if none is
+    // set, to avoid resetting an existing countdown. Race-safe: the WHERE
+    // clause re-checks admin_verify_deadline at UPDATE time.
+    const updateResult = await query(
+      `UPDATE groups
+       SET admin_verify_deadline = now() + interval '5 minutes'
+       WHERE id = $1 AND admin_verify_deadline IS NULL`,
+      [group.id],
+    );
+
+    if ((updateResult.rowCount ?? 0) > 0) {
+      armedCount++;
+      console.log(
+        `[CRON] Armed admin-verify deadline for group ${group.telegram_id} — no admin holds a Bouncer Pass`,
+      );
+    }
+  }
+
+  if (armedCount > 0) {
+    console.log(`[CRON] Admin pass recheck done. Armed ${armedCount} group(s).`);
   }
 }

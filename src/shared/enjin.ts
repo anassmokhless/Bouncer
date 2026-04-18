@@ -160,13 +160,19 @@ export async function tokenExists(
 }
 
 //bouncer pass check (early access)
-export async function hasBouncerPass(walletAddress: string): Promise<boolean> {
+// Returns:
+//   true  — wallet holds the pass
+//   false — wallet definitively doesn't hold the pass (clean API result)
+//   null  — couldn't determine (API error). Callers must treat null conservatively:
+//           never make a destructive decision (leaving a group, kicking an admin)
+//           on a null result — retry on the next cycle instead. Mirrors the
+//           semantics of checkNftOwnership used by the member-gating flow.
+export async function hasBouncerPass(walletAddress: string): Promise<boolean | null> {
   const collectionId = process.env.BOUNCER_COLLECTION_ID;
   if (!collectionId) return true; // no collection set = early access disabled
 
   const tokenId = process.env.BOUNCER_TOKEN_ID || null;
-  const result = await checkNftOwnership(walletAddress, collectionId, tokenId, 1);
-  return result === true; // null (API error) treated as false for bouncer pass
+  return checkNftOwnership(walletAddress, collectionId, tokenId, 1);
 }
 
 //ntf ownership verification — returns null on API error (skip, don't kick)

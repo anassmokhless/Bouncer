@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import { Api } from "grammy";
 import { query } from "../../shared/db.js";
 import { checkNftOwnership, collectionExists, tokenExists } from "../../shared/enjin.js";
-import { requireLogin, requireGroupAdmin } from "../middleware.js";
+import { requireLogin, requireGroupAdmin, requireBouncerPass } from "../middleware.js";
 
 const api = new Api(process.env.BOT_TOKEN!);
 
@@ -68,7 +68,11 @@ router.get("/", async (req: Request, res: Response) => {
     [user.telegramId],
   );
 
-  res.render("dashboard", { user, groups: result.rows });
+  // requireBouncerPass middleware redirects here with ?accessError=... when
+  // a user lacking the pass tries to mutate; render it as a banner.
+  const accessError = typeof req.query.accessError === "string" ? req.query.accessError : null;
+
+  res.render("dashboard", { user, groups: result.rows, accessError });
 });
 
 // Group detail
@@ -131,10 +135,12 @@ router.get("/:id", requireGroupAdmin, async (req: Request, res: Response) => {
   // If the admin just tried to add a rule and it failed validation, the POST
   // handler redirected back here with ?ruleError=... so we can render a banner.
   const ruleError = typeof req.query.ruleError === "string" ? req.query.ruleError : null;
+  // Same pattern for the Bouncer Pass gate (requireBouncerPass middleware).
+  const accessError = typeof req.query.accessError === "string" ? req.query.accessError : null;
 
   res.render("group", {
     user, group: groupResult.rows[0], rules: rules.rows, members: members.rows,
-    page, totalPages, totalMembers, search, stats, ruleError,
+    page, totalPages, totalMembers, search, stats, ruleError, accessError,
   });
 });
 
@@ -149,7 +155,7 @@ router.get("/:id", requireGroupAdmin, async (req: Request, res: Response) => {
 // Concurrency: one running job per group (second admin clicking recheck while one is
 // in progress gets 409). Completed jobs are retained for JOB_RETENTION_MS so clients
 // that poll late still see the final result, then auto-pruned.
-router.post("/:id/recheck", requireGroupAdmin, async (req: Request, res: Response) => {
+router.post("/:id/recheck", requireGroupAdmin, requireBouncerPass, async (req: Request, res: Response) => {
   const user = req.session.user!;
   const groupId = req.params.id as string;
 
@@ -286,7 +292,7 @@ router.get("/:id/recheck/status", requireGroupAdmin, async (req: Request, res: R
 });
 
 // Add rule
-router.post("/:id/rules", requireGroupAdmin, async (req: Request, res: Response) => {
+router.post("/:id/rules", requireGroupAdmin, requireBouncerPass, async (req: Request, res: Response) => {
   const user = req.session.user!;
   const groupId = req.params.id as string;
 
@@ -355,7 +361,7 @@ router.post("/:id/rules", requireGroupAdmin, async (req: Request, res: Response)
 });
 
 // Delete rule
-router.post("/:id/rules/:ruleId/delete", requireGroupAdmin, async (req: Request, res: Response) => {
+router.post("/:id/rules/:ruleId/delete", requireGroupAdmin, requireBouncerPass, async (req: Request, res: Response) => {
   const user = req.session.user!;
   const { id: groupId, ruleId } = req.params;
 

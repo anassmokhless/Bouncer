@@ -41,7 +41,24 @@ export async function handleBotAdded(ctx: Context) {
         return;
     }
 
-    if (!(await checkBouncerAccess(addedBy.id.toString()))) {
+    const access = await checkBouncerAccess(addedBy.id.toString());
+    if (access === null) {
+        // API error — can't confirm the adder holds the pass. Refuse the add
+        // conservatively (safer than admitting a potential non-holder) but tell
+        // them to retry once the API recovers. Nothing is persisted yet, so a
+        // retry is a clean slate.
+        try {
+            await ctx.api.sendMessage(
+                chatId,
+                "Couldn't verify the Bouncer Pass right now (Enjin API error). Please try adding me again in a moment.",
+            );
+            await ctx.api.leaveChat(chatId);
+        } catch (err) {
+            console.error("[BOT] Failed to leave chat (verification error):", err);
+        }
+        return;
+    }
+    if (!access) {
         try {
             await ctx.api.sendMessage(
                 chatId,
@@ -64,9 +81,9 @@ export async function handleBotAdded(ctx: Context) {
         [group.id, user.id],
     );
 
-    // Always persist admin_user_id so we can find this admin's groups later —
-    // e.g. when they /unlink and we need to re-check their Bouncer Pass.
-    // admin_verify_deadline is only set if they haven't linked a wallet yet.
+    // Record the first-adder as provenance. The early-access gate no longer
+    // reads admin_user_id (it iterates group_admins instead), but the column
+    // is preserved for audit/debug value.
     await query(
         `UPDATE groups SET admin_user_id = $1 WHERE id = $2`,
         [user.id, group.id],

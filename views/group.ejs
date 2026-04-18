@@ -17,6 +17,15 @@
     </div>
   </div>
 
+  <% if (typeof accessError !== 'undefined' && accessError) { %>
+    <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-6 flex items-start gap-2">
+      <svg class="w-5 h-5 text-red-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"></path>
+      </svg>
+      <p class="text-red-400 text-sm"><%= accessError %></p>
+    </div>
+  <% } %>
+
   <div class="grid gap-4 md:grid-cols-3 mb-8">
     <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
       <p class="text-sm text-gray-500">Verified Members</p>
