@@ -76,11 +76,11 @@ export function startCronJobs(bot: Bot) {
 
   // Every minute — matches the shortest verification deadline (5 min for new joiners),
   // so users get kicked within ~1 min of their deadline instead of waiting up to an hour.
-  // Cheap: the filtering SELECT is indexed and typically returns 0 rows. No startup log
-  // per tick — per-kick logs (`[CRON] Kicked expired: ...`) already fire on real work.
+  // Cheap: the filtering SELECT is indexed and typically returns 0 rows.
   cron.schedule("* * * * *", async () => {
     if (isKicking) return;
     isKicking = true;
+    console.log("[CRON] kick-expired tick");
     try {
       await withAdvisoryLock(LOCK_ID_KICK, async () => {
         // Prune expired entries from existing-member TTL cache
@@ -98,6 +98,7 @@ export function startCronJobs(bot: Bot) {
   cron.schedule("* * * * *", async () => {
     if (isLeaving) return;
     isLeaving = true;
+    console.log("[CRON] admin-verify tick");
     try {
       await withAdvisoryLock(LOCK_ID_LEAVE, () => leaveUnverifiedGroups(bot));
     } catch (err) {
@@ -115,6 +116,7 @@ export function startCronJobs(bot: Bot) {
   cron.schedule("*/5 * * * *", async () => {
     if (isAdminRechecking) return;
     isAdminRechecking = true;
+    console.log("[CRON] admin-recheck tick");
     try {
       await withAdvisoryLock(LOCK_ID_ADMIN_RECHECK, () => recheckAdminPassOwnership(bot));
     } catch (err) {
