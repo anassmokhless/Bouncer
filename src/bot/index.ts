@@ -14,7 +14,7 @@ import { statusCommand } from "./commands/status.js";
 import { registerSetupCommands } from "./commands/setup.js";
 import { handleNewMembers } from "./handlers/new-member.js";
 import { handleBotAdded } from "./handlers/bot-added.js";
-import { handleMemberLeft } from "./handlers/member-left.js";
+import { handleMemberLeft, handleAdminDemoted } from "./handlers/member-left.js";
 import { handleExistingMember } from "./handlers/existing-member.js";
 import { startCronJobs } from "./cron.js";
 
@@ -58,7 +58,30 @@ bot.command("unlink", unlinkCommand);
 bot.command("status", statusCommand);
 registerSetupCommands(bot);
 bot.on("my_chat_member", handleBotAdded);
-bot.on("chat_member", handleMemberLeft);
+// chat_member fires on any membership-status change in a group where the bot
+// is admin. We dispatch to two handlers independently, not as an if/else:
+//   - Admin → non-admin transition (demotion) → prune group_admins row.
+//   - Any status → left/kicked transition → mark members row as LEFT and clear caches.
+// Both can fire in the same event when someone is demoted straight to kicked,
+// so each handler runs conditionally on its own transition check.
+bot.on("chat_member", async (ctx) => {
+  const update = ctx.chatMember;
+  if (!update) return;
+
+  const oldStatus = update.old_chat_member.status;
+  const newStatus = update.new_chat_member.status;
+
+  const wasAdmin = oldStatus === "administrator" || oldStatus === "creator";
+  const isAdmin = newStatus === "administrator" || newStatus === "creator";
+
+  if (wasAdmin && !isAdmin) {
+    await handleAdminDemoted(ctx);
+  }
+
+  if (newStatus === "left" || newStatus === "kicked") {
+    await handleMemberLeft(ctx);
+  }
+});
 bot.on(":new_chat_members", handleNewMembers);
 bot.on("message", handleExistingMember);
 
