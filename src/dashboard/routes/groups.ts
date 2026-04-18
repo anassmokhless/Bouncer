@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { Api } from "grammy";
 import { query } from "../../shared/db.js";
-import { checkNftOwnership } from "../../shared/enjin.js";
+import { checkNftOwnership, collectionExists, tokenExists } from "../../shared/enjin.js";
 import { requireLogin, requireGroupAdmin } from "../middleware.js";
 
 const api = new Api(process.env.BOT_TOKEN!);
@@ -128,9 +128,13 @@ router.get("/:id", requireGroupAdmin, async (req: Request, res: Response) => {
     memberParams,
   );
 
+  // If the admin just tried to add a rule and it failed validation, the POST
+  // handler redirected back here with ?ruleError=... so we can render a banner.
+  const ruleError = typeof req.query.ruleError === "string" ? req.query.ruleError : null;
+
   res.render("group", {
     user, group: groupResult.rows[0], rules: rules.rows, members: members.rows,
-    page, totalPages, totalMembers, search, stats,
+    page, totalPages, totalMembers, search, stats, ruleError,
   });
 });
 
@@ -288,20 +292,49 @@ router.post("/:id/rules", requireGroupAdmin, async (req: Request, res: Response)
 
   const { collectionId, tokenId, minBalance, checkInterval } = req.body;
 
+  // Helper: redirect back to the group page with an error message that the view
+  // renders as a dismissable banner above the add-rule form.
+  const redirectWithError = (msg: string) => {
+    res.redirect(`/dashboard/${groupId}?ruleError=${encodeURIComponent(msg)}`);
+  };
+
   if (!collectionId) {
-    res.status(400).json({ error: "Collection ID is required" });
+    redirectWithError("Collection ID is required.");
     return;
   }
 
   // Enjin collection/token IDs are numeric. Reject non-numeric input early so admins get
   // clear feedback instead of silently-broken rules that never verify anyone.
   if (!/^\d+$/.test(collectionId)) {
-    res.status(400).json({ error: "Collection ID must be numeric" });
+    redirectWithError("Collection ID must be numeric.");
     return;
   }
   if (tokenId && !/^\d+$/.test(tokenId)) {
-    res.status(400).json({ error: "Token ID must be numeric" });
+    redirectWithError("Token ID must be numeric.");
     return;
+  }
+
+  // Verify collection (and token, if specified) actually exist on Enjin. Prevents
+  // admins from saving a typo'd ID that would never verify anyone.
+  const collectionOk = await collectionExists(collectionId);
+  if (collectionOk === false) {
+    redirectWithError(`Collection ${collectionId} was not found on the Enjin blockchain. Double-check the ID.`);
+    return;
+  }
+  if (collectionOk === null) {
+    redirectWithError("Couldn't validate the collection right now. Please try again in a moment.");
+    return;
+  }
+  if (tokenId) {
+    const tokenOk = await tokenExists(collectionId, tokenId);
+    if (tokenOk === false) {
+      redirectWithError(`Token ${tokenId} was not found in collection ${collectionId}. Double-check the ID.`);
+      return;
+    }
+    if (tokenOk === null) {
+      redirectWithError("Couldn't validate the token right now. Please try again in a moment.");
+      return;
+    }
   }
 
   const intervalHours = Math.min(Math.max(parseInt(checkInterval) || 1, 1), 720);

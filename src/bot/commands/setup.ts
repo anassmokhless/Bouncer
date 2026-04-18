@@ -1,6 +1,7 @@
 import { Bot, Context } from "grammy";
 import { query } from "../../shared/db.js";
 import { getOrCreateGroup, getOrCreateUser, checkBouncerAccess } from "../helpers.js";
+import { collectionExists, tokenExists } from "../../shared/enjin.js";
 //for group admins
 
 //check if user is group admin + holds bouncer pass
@@ -106,6 +107,29 @@ export function registerSetupCommands(bot: Bot) {
     if (tokenId !== null && !/^\d+$/.test(tokenId)) {
       await ctx.reply("Token ID must be numeric. Example: /addrule 1234 5678 3");
       return;
+    }
+
+    // Verify collection (and token, if specified) actually exist on Enjin. Prevents
+    // admins from saving a typo'd ID that never verifies anyone.
+    const collectionOk = await collectionExists(collectionId);
+    if (collectionOk === false) {
+      await ctx.reply(`Collection ${collectionId} was not found on the Enjin blockchain. Double-check the ID.`);
+      return;
+    }
+    if (collectionOk === null) {
+      await ctx.reply("Couldn't validate the collection right now. Please try again in a moment.");
+      return;
+    }
+    if (tokenId !== null) {
+      const tokenOk = await tokenExists(collectionId, tokenId);
+      if (tokenOk === false) {
+        await ctx.reply(`Token ${tokenId} was not found in collection ${collectionId}. Double-check the ID.`);
+        return;
+      }
+      if (tokenOk === null) {
+        await ctx.reply("Couldn't validate the token right now. Please try again in a moment.");
+        return;
+      }
     }
 
     const chatId = ctx.chat!.id.toString();

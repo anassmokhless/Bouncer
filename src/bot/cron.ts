@@ -1,7 +1,7 @@
 import cron from "node-cron";
 import { Bot } from "grammy";
 import { query, pool } from "../shared/db.js";
-import { getVerifiedWallet, checkNftOwnership } from "../shared/enjin.js";
+import { getVerifiedWallet, checkNftOwnership, hasBouncerPass } from "../shared/enjin.js";
 import { safeUnmute } from "./helpers.js";
 import { removeCheckedPair, pruneCheckedPairs } from "./handlers/existing-member.js";
 
@@ -394,34 +394,43 @@ async function recheckVerifiedMembers(bot: Bot) {
       if (stillHoldsNft) {
         await query(`UPDATE members SET last_checked = now() WHERE id = $1`, [member.memberId]);
       } else {
+        // Only update DB + audit log if the kick actually succeeded. Telegram
+        // rejects attempts to ban group creators (and some other edge cases), so
+        // optimistically flipping status to KICKED would leave stale state — user
+        // visible in the group but marked KICKED in DB. Guarding on kickSuccess
+        // keeps DB in sync with reality; the next cron cycle retries automatically.
+        let kickSuccess = false;
         try {
           await bot.api.banChatMember(parseInt(member.groupTelegramId), parseInt(member.userTelegramId), {
             until_date: Math.floor(Date.now() / 1000) + 40,
           });
+          kickSuccess = true;
         } catch (err) {
           console.error(`[CRON] Failed to kick ${member.userTelegramId}:`, err);
         }
 
-        const client = await pool.connect();
-        try {
-          await client.query("BEGIN");
-          await client.query(`UPDATE members SET status = 'KICKED', last_checked = now() WHERE id = $1`, [member.memberId]);
-          await client.query(
-            `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-            [member.groupId, member.userId, "USER_KICKED", JSON.stringify({ reason: "NFT no longer held" })],
-          );
-          await client.query("COMMIT");
-        } catch (err) {
-          await client.query("ROLLBACK");
-          console.error(`[CRON] Failed to update kick status for ${member.userTelegramId}:`, err);
-        } finally {
-          client.release();
+        if (kickSuccess) {
+          const client = await pool.connect();
+          try {
+            await client.query("BEGIN");
+            await client.query(`UPDATE members SET status = 'KICKED', last_checked = now() WHERE id = $1`, [member.memberId]);
+            await client.query(
+              `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
+              [member.groupId, member.userId, "USER_KICKED", JSON.stringify({ reason: "NFT no longer held" })],
+            );
+            await client.query("COMMIT");
+          } catch (err) {
+            await client.query("ROLLBACK");
+            console.error(`[CRON] Failed to update kick status for ${member.userTelegramId}:`, err);
+          } finally {
+            client.release();
+          }
+
+          // Clear from existing-member cache so they get re-checked if they rejoin
+          removeCheckedPair(member.groupTelegramId, member.userTelegramId);
+
+          kickedCount++;
         }
-
-        // Clear from existing-member cache so they get re-checked if they rejoin
-        removeCheckedPair(member.groupTelegramId, member.userTelegramId);
-
-        kickedCount++;
       }
     }));
   }
@@ -444,6 +453,11 @@ async function kickExpiredPendingMembers(bot: Bot) {
   for (const row of result.rows) {
     const isBan = parseInt(row.previous_kicks) >= 4;
 
+    // Only update DB + audit log if the ban/kick actually succeeded. Telegram
+    // rejects attempts to ban group creators (and some other edge cases), so
+    // optimistically flipping status to KICKED would leave stale state — user
+    // visible in the group but marked KICKED in DB. Next cron tick retries.
+    let kickSuccess = false;
     try {
       if (isBan) {
         await bot.api.banChatMember(parseInt(row.group_telegram_id), parseInt(row.user_telegram_id));
@@ -452,9 +466,12 @@ async function kickExpiredPendingMembers(bot: Bot) {
           until_date: Math.floor(Date.now() / 1000) + 40,
         });
       }
+      kickSuccess = true;
     } catch (err) {
       console.error(`[CRON] Failed to ${isBan ? "ban" : "kick"} expired member:`, err);
     }
+
+    if (!kickSuccess) continue;
 
     const client = await pool.connect();
     try {
@@ -481,35 +498,52 @@ async function kickExpiredPendingMembers(bot: Bot) {
 }
 
 async function leaveUnverifiedGroups(bot: Bot) {
-  // Atomic: find and delete groups where admin_verify_deadline has passed AND admin still hasn't linked a wallet.
-  // The NOT EXISTS check at DELETE time prevents races with pollPendingVerifications updating wallet_address
-  // between a separate SELECT and DELETE. group_admins, nft_rules, members, audit_logs all cascade on groups.id.
+  // Two triggers for admin_verify_deadline being set:
+  //   1. bot-added.ts — admin hasn't linked a wallet yet (initial 5-min window)
+  //   2. unlink.ts — admin ran /unlink and now has 5 min to re-verify with a Bouncer Pass
+  //
+  // For each group whose deadline has passed, check if the admin currently holds a
+  // Bouncer Pass. If yes, clear the deadline (admin verified in time). If not
+  // (no wallet OR wallet doesn't hold the MFT), leave the group.
+  //
+  // Note: we keep admin_user_id permanent so we can find this admin's groups again
+  // if they /unlink later. Only admin_verify_deadline gets cleared.
   const result = await query(
-    `DELETE FROM groups g
+    `SELECT g.id, g.telegram_id, g.admin_user_id, u.wallet_address
+     FROM groups g
+     LEFT JOIN users u ON u.id = g.admin_user_id
      WHERE g.admin_verify_deadline IS NOT NULL
-       AND g.admin_verify_deadline < now()
-       AND NOT EXISTS (
-         SELECT 1 FROM users u
-         WHERE u.id = g.admin_user_id AND u.wallet_address IS NOT NULL
-       )
-     RETURNING g.id, g.telegram_id`,
+       AND g.admin_verify_deadline < now()`,
   );
 
   for (const row of result.rows) {
+    // Check if admin currently holds a Bouncer Pass. hasBouncerPass returns true
+    // when BOUNCER_COLLECTION_ID is unset (early access disabled), so this degrades
+    // to "does admin have any wallet?" in that mode.
+    const adminHasMft = row.wallet_address
+      ? await hasBouncerPass(row.wallet_address)
+      : false;
+
+    if (adminHasMft) {
+      // Admin re-verified with a valid wallet in time — clear the deadline, keep the row.
+      await query(`UPDATE groups SET admin_verify_deadline = NULL WHERE id = $1`, [row.id]);
+      continue;
+    }
+
+    // Admin failed to re-verify — leave the group and delete the DB row.
+    // Cascade removes group_admins, nft_rules, members, audit_logs.
     try {
-      await bot.api.sendMessage(parseInt(row.telegram_id), "Admin did not verify within 5 minutes. Leaving group.");
+      await bot.api.sendMessage(
+        parseInt(row.telegram_id),
+        "Admin did not verify a Bouncer Pass in time. Leaving group.",
+      );
       await bot.api.leaveChat(parseInt(row.telegram_id));
     } catch (err) {
       console.error(`[CRON] Failed to leave group ${row.telegram_id}:`, err);
     }
 
-    console.log(`[CRON] Left group ${row.telegram_id} — admin did not verify in time`);
-  }
+    await query(`DELETE FROM groups WHERE id = $1`, [row.id]);
 
-  // Clear deadline for admins who verified in time (cleanup so the cron stops evaluating these rows)
-  await query(
-    `UPDATE groups SET admin_verify_deadline = NULL, admin_user_id = NULL
-     WHERE admin_verify_deadline IS NOT NULL
-       AND admin_user_id IN (SELECT id FROM users WHERE wallet_address IS NOT NULL)`,
-  );
+    console.log(`[CRON] Left group ${row.telegram_id} — admin did not verify with Bouncer Pass`);
+  }
 }

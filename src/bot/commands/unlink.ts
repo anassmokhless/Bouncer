@@ -31,6 +31,15 @@ export async function unlinkCommand(ctx: Context) {
     [user.id],
   );
 
+  // Count how many groups this user administers. If they're responsible for any,
+  // we'll start a 5-minute admin-verify countdown — leaveUnverifiedGroups checks
+  // Bouncer Pass ownership when the deadline expires.
+  const adminGroupsResult = await query(
+    `SELECT COUNT(*)::int AS count FROM groups WHERE admin_user_id = $1`,
+    [user.id],
+  );
+  const adminGroupCount: number = adminGroupsResult.rows[0].count;
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -44,6 +53,16 @@ export async function unlinkCommand(ctx: Context) {
        WHERE user_id = $1 AND status = 'VERIFIED'`,
       [user.id],
     );
+    // Start the 5-minute admin-verify countdown on every group this user administers.
+    // If they re-verify with a Bouncer-Pass-holding wallet before the deadline,
+    // leaveUnverifiedGroups clears the deadline. Otherwise it leaves those groups.
+    if (adminGroupCount > 0) {
+      await client.query(
+        `UPDATE groups SET admin_verify_deadline = now() + interval '5 minutes'
+         WHERE admin_user_id = $1`,
+        [user.id],
+      );
+    }
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK");
@@ -63,7 +82,21 @@ export async function unlinkCommand(ctx: Context) {
     removeCheckedPair(group.group_telegram_id, telegramId);
   }
 
-  await ctx.reply(
-    "Wallet unlinked. Your access to NFT-gated groups has been paused. You have 1 hour to re-verify or you'll be removed.\n\nUse /verify to link a new wallet.",
+  // Build the reply — admins of any group get an extra warning about the 5-minute
+  // bot-leave deadline on top of the standard member unlink message.
+  const lines = ["Wallet unlinked."];
+  if (adminGroupCount > 0) {
+    lines.push(
+      "",
+      `⚠️ You administer ${adminGroupCount} group${adminGroupCount === 1 ? "" : "s"} with Bouncer. Re-verify with your Bouncer Pass within 5 minutes or I'll leave ${adminGroupCount === 1 ? "that group" : "those groups"}.`,
+    );
+  }
+  lines.push(
+    "",
+    "Your access to gated groups (as a member) has been paused. You have 1 hour to re-verify or you'll be removed.",
+    "",
+    "Use /verify to link a new wallet.",
   );
+
+  await ctx.reply(lines.join("\n"));
 }

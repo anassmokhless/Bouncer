@@ -64,12 +64,19 @@ export async function handleBotAdded(ctx: Context) {
         [group.id, user.id],
     );
 
-    // Check if admin has a linked wallet
+    // Always persist admin_user_id so we can find this admin's groups later —
+    // e.g. when they /unlink and we need to re-check their Bouncer Pass.
+    // admin_verify_deadline is only set if they haven't linked a wallet yet.
+    await query(
+        `UPDATE groups SET admin_user_id = $1 WHERE id = $2`,
+        [user.id, group.id],
+    );
+
     if (!user.wallet_address) {
-        // Store deadline in DB so the cron can enforce it even after a restart
+        // Store deadline so the cron can enforce it even after a restart
         await query(
-            `UPDATE groups SET admin_verify_deadline = now() + interval '5 minutes', admin_user_id = $1 WHERE id = $2`,
-            [user.id, group.id],
+            `UPDATE groups SET admin_verify_deadline = now() + interval '5 minutes' WHERE id = $1`,
+            [group.id],
         );
 
         await ctx.api.sendMessage(
@@ -79,7 +86,7 @@ export async function handleBotAdded(ctx: Context) {
                 "",
                 "⚠️ Make sure to promote me to admin so I can manage members.",
                 "",
-                `You haven't linked a wallet yet. DM me to verify: https://t.me/${process.env.BOT_USERNAME}?start=verify`,
+                `You haven't linked a wallet yet. DM me and run /verify to link your wallet first.`,
                 "",
                 "You have 5 minutes to link your wallet or I'll leave this group.",
             ].join("\n"),

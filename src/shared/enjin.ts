@@ -88,6 +88,77 @@ export async function getVerifiedWallet(
   }
 }
 
+// Detect Enjin's "not found" response shape. The Enjin Platform returns a 400
+// validation error (category: "validation", extensions.validation.<field>: [...])
+// when an ID doesn't exist on-chain — NOT a null result. The graphql-request
+// client throws a ClientError for any non-2xx, so the catch block below has to
+// discriminate "user typo'd the ID" from "actual API outage" by inspecting the
+// error shape. Any validation-category error means the input refers to something
+// that doesn't exist on-chain; anything else is a real error.
+function isEnjinValidationError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as {
+    response?: { errors?: Array<{ extensions?: { category?: string } }> };
+  };
+  const errors = e.response?.errors;
+  if (!Array.isArray(errors)) return false;
+  return errors.some((ge) => ge?.extensions?.category === "validation");
+}
+
+// Verify an Enjin collection exists. Returns:
+//   true  — collection found on-chain
+//   false — collection does not exist (or ID is rejected by Enjin's validator)
+//   null  — real API error (network, auth, 5xx, schema mismatch, etc.)
+// Called from /addrule paths (bot + dashboard) before inserting a rule so admins
+// can't accidentally save a collection ID that will never verify anyone.
+export async function collectionExists(collectionId: string): Promise<boolean | null> {
+  const q = gql`
+    query GetCollection($collectionId: BigInt!) {
+      GetCollection(collectionId: $collectionId) {
+        collectionId
+      }
+    }
+  `;
+  try {
+    const data = await getClient().request<{
+      GetCollection: { collectionId: string } | null;
+    }>(q, { collectionId });
+    return data.GetCollection !== null;
+  } catch (err) {
+    if (isEnjinValidationError(err)) return false;
+    console.error("[ENJIN] collectionExists failed:", err);
+    return null;
+  }
+}
+
+// Verify a specific token exists in a collection. Same return semantics as
+// collectionExists. Only called when the admin supplies a token_id; rules
+// that accept "any token in the collection" skip this check.
+export async function tokenExists(
+  collectionId: string,
+  tokenId: string,
+): Promise<boolean | null> {
+  const q = gql`
+    query GetToken($collectionId: BigInt!, $tokenId: EncodableTokenIdInput!) {
+      GetToken(collectionId: $collectionId, tokenId: $tokenId) {
+        tokenId {
+          integer
+        }
+      }
+    }
+  `;
+  try {
+    const data = await getClient().request<{
+      GetToken: { tokenId: { integer: string } } | null;
+    }>(q, { collectionId, tokenId: { integer: tokenId } });
+    return data.GetToken !== null;
+  } catch (err) {
+    if (isEnjinValidationError(err)) return false;
+    console.error("[ENJIN] tokenExists failed:", err);
+    return null;
+  }
+}
+
 //bouncer pass check (early access)
 export async function hasBouncerPass(walletAddress: string): Promise<boolean> {
   const collectionId = process.env.BOUNCER_COLLECTION_ID;
