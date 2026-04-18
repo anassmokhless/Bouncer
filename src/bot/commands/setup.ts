@@ -177,11 +177,11 @@ export function registerSetupCommands(bot: Bot) {
           `  Token: ${tokenId || "Any"}`,
           `  Min balance: ${minBalance}`,
           "",
-          "Existing members — to keep your access, DM me and run /verify.",
-          `Start here: https://t.me/${process.env.BOT_USERNAME}?start=verify`,
+          `Existing members — to keep your access, <a href="https://t.me/${process.env.BOT_USERNAME}?start=verify">DM me and verify</a>.`,
           "",
           "Anyone unverified will be removed on the next scheduled re-check.",
         ].join("\n"),
+        { parse_mode: "HTML" },
       );
     } catch (err) {
       console.error("[BOT] /addrule failed:", err);

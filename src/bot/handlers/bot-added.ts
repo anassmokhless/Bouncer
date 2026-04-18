@@ -103,10 +103,11 @@ export async function handleBotAdded(ctx: Context) {
                 "",
                 "⚠️ Make sure to promote me to admin so I can manage members.",
                 "",
-                `You haven't linked a wallet yet. DM me and run /verify to link your wallet first.`,
+                `You haven't linked a wallet yet. <a href="https://t.me/${process.env.BOT_USERNAME}?start=verify">DM me to verify your wallet</a>.`,
                 "",
                 "You have 5 minutes to link your wallet or I'll leave this group.",
             ].join("\n"),
+            { parse_mode: "HTML" },
         );
     } else {
         await ctx.api.sendMessage(

@@ -1,7 +1,7 @@
 import { Context } from "grammy";
 import { query } from "../../shared/db.js";
 import { checkNftOwnership } from "../../shared/enjin.js";
-import { getOrCreateGroup, getOrCreateUser, safeMute, safeUnmute } from "../helpers.js";
+import { getOrCreateGroup, getOrCreateUser, safeMute, safeUnmute, escapeHtml } from "../helpers.js";
 
 export async function handleNewMembers(ctx: Context) {
   const newMembers = ctx.message?.new_chat_members;
@@ -104,14 +104,18 @@ export async function handleNewMembers(ctx: Context) {
         );
 
         try {
+          // HTML parse mode (not Markdown v1) — Markdown v1 breaks on any `_`
+          // or `*` in first_name (e.g., "Cryptan_19"). HTML only needs `<`, `>`,
+          // `&` escaped, which escapeHtml handles. first_name can be absent on
+          // accounts without a display name, so guard with `|| ""`.
           await ctx.reply([
-            `Welcome ${member.first_name}! Access to this group requires an Enjin NFT.`,
+            `Welcome ${escapeHtml(member.first_name || "")}! Access to this group requires an Enjin NFT.`,
             "",
             "Your messages will be removed until you verify your wallet.",
-            `[Start verification](https://t.me/${process.env.BOT_USERNAME}?start=verify)`,
+            `<a href="https://t.me/${process.env.BOT_USERNAME}?start=verify">Start verification</a>`,
             "",
             "You have 5 minutes to verify or you'll be removed.",
-          ].join("\n"), { parse_mode: "Markdown" });
+          ].join("\n"), { parse_mode: "HTML" });
         } catch (err) {
           console.error("[BOT] Failed to send welcome message:", err);
         }

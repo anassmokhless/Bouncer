@@ -104,6 +104,17 @@ export async function safeUnmute(
   }
 }
 
+// Escape characters that have special meaning in Telegram's HTML parse mode.
+// Only `<`, `>`, `&` need escaping — the HTML parse mode is far more forgiving
+// than Markdown v1, which requires escaping `_`, `*`, `[`, `]`, `(`, `)`, `` ` ``.
+// Use this on any user-provided string (first_name, username) injected into a
+// message sent with `parse_mode: "HTML"`. Real production incident: a user
+// named "Cryptan_19" joined and the `_` broke Markdown parsing mid-message,
+// rejecting the entire welcome message with a 400 from Telegram.
+export function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 export async function getOrCreateGroup(telegramId: string, title: string) {
   const result = await query(
     `INSERT INTO groups (telegram_id, title)

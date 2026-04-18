@@ -1,7 +1,7 @@
 import { Context } from "grammy";
 import { query } from "../../shared/db.js";
 import { checkNftOwnership } from "../../shared/enjin.js";
-import { getOrCreateUser, safeMute } from "../helpers.js";
+import { getOrCreateUser, safeMute, escapeHtml } from "../helpers.js";
 
 // Per-entry cache with TWO modes:
 //   - 'skip'   → user is verified / admin / in a group without rules. Skip the full flow.
@@ -197,14 +197,17 @@ export async function handleExistingMember(ctx: Context) {
 
   if (!wasAlreadyPending) {
     try {
+      // HTML parse mode (not Markdown v1) — see the matching change in
+      // new-member.ts for full rationale. Short version: first_name can
+      // contain `_` / `*` / etc. which break Markdown v1 parsing mid-message.
       await ctx.reply([
-        `${ctx.from.first_name}, access to this group requires an Enjin NFT.`,
+        `${escapeHtml(ctx.from.first_name || "")}, access to this group requires an Enjin NFT.`,
         "",
         "Your messages will be removed until you verify your wallet.",
-        `[Start verification](https://t.me/${process.env.BOT_USERNAME}?start=verify)`,
+        `<a href="https://t.me/${process.env.BOT_USERNAME}?start=verify">Start verification</a>`,
         "",
         "You have 24 hours to verify or you'll be removed.",
-      ].join("\n"), { parse_mode: "Markdown" });
+      ].join("\n"), { parse_mode: "HTML" });
     } catch (err) {
       console.error("[BOT] Failed to send verification prompt:", err);
     }
