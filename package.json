@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "connect-pg-simple": "^10.0.0",
+    "cookie-parser": "^1.4.7",
     "dotenv": "^17.4.1",
     "ejs": "^5.0.1",
     "express": "^5.2.1",
@@ -31,6 +32,7 @@
   "devDependencies": {
     "@tailwindcss/cli": "^4.2.2",
     "@types/connect-pg-simple": "^7.0.3",
+    "@types/cookie-parser": "^1.4.10",
     "@types/ejs": "^3.1.5",
     "@types/express": "^5.0.6",
     "@types/express-session": "^1.18.2",

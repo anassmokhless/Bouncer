@@ -10,6 +10,7 @@ import helmet from "helmet";
 import "../types.js";
 import crypto from "crypto";
 import express from "express";
+import cookieParser from "cookie-parser";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import { pool } from "../shared/db.js";
@@ -55,6 +56,7 @@ app.use(
   }),
 );
 app.use(express.static(path.resolve(import.meta.dirname, "../../public")));
+app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -73,16 +75,39 @@ app.use(
   }),
 );
 
-// CSRF protection
+// CSRF protection via the double-submit cookie pattern. The token is stored in
+// a dedicated cookie (NOT the session) and mirrored in form bodies / X-CSRF-Token
+// headers. On POST we just verify the two match. A cross-origin attacker can't
+// read our cookie from their page, so they can't forge a request whose body
+// token matches our cookie — that's what makes it CSRF-safe.
+//
+// Why not store it on req.session like before? Anonymous visitors (including
+// bot scanners) would trigger session row creation just by loading a page,
+// polluting the `session` table with empty rows. Moving CSRF out of the session
+// means sessions are only ever created for users who actually log in.
+const CSRF_COOKIE_NAME = "csrf-token";
+
 app.use((req, res, next) => {
-  if (!req.session.csrfToken) {
-    req.session.csrfToken = crypto.randomBytes(32).toString("hex");
+  let token = req.cookies?.[CSRF_COOKIE_NAME] as string | undefined;
+
+  // First request without a token — mint one and set it as a cookie.
+  if (!token) {
+    token = crypto.randomBytes(32).toString("hex");
+    res.cookie(CSRF_COOKIE_NAME, token, {
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      httpOnly: true, // tokens flow via server-rendered form field / header, not JS
+    });
   }
-  res.locals.csrfToken = req.session.csrfToken;
+
+  // Expose to EJS templates under the same name so existing `<%= csrfToken %>`
+  // usages keep working unchanged.
+  res.locals.csrfToken = token;
 
   if (req.method === "POST") {
-    const token = req.body._csrf || req.headers["x-csrf-token"];
-    if (token !== req.session.csrfToken) {
+    const submitted = req.body?._csrf || req.headers["x-csrf-token"];
+    if (submitted !== token) {
       res.status(403).send("Invalid CSRF token");
       return;
     }
