@@ -134,7 +134,7 @@ app.get("/login", (req, res) => {
 // Landing page — fetches live counts from DB on each request.
 app.get("/", async (_req, res, next) => {
   try {
-    const [usersResult, groupsResult] = await Promise.all([
+    const [usersResult, groupsResult, processedResult] = await Promise.all([
       query<{ c: number }>(
         `SELECT COUNT(*)::int AS c FROM users
          WHERE is_verified = true AND wallet_address IS NOT NULL`,
@@ -142,11 +142,17 @@ app.get("/", async (_req, res, next) => {
       query<{ c: number }>(
         `SELECT COUNT(*)::int AS c FROM groups WHERE is_active = true`,
       ),
+      query<{ c: number }>(
+        `SELECT COUNT(*)::int AS c FROM audit_logs
+         WHERE action IN ('USER_VERIFIED', 'USER_AUTO_VERIFIED',
+                          'USER_KICKED', 'USER_BANNED', 'USER_KICKED_MANUAL')`,
+      ),
     ]);
     res.render("landing", {
       botUsername: process.env.BOT_USERNAME,
       verifiedUsers: usersResult.rows[0].c,
       verifiedGroups: groupsResult.rows[0].c,
+      membersProcessed: processedResult.rows[0].c,
     });
   } catch (err) {
     next(err);

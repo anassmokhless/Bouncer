@@ -43,7 +43,7 @@
     </div>
 
     <!-- Live stats — read from DB on each page load -->
-    <div class="mt-12 flex flex-wrap justify-center gap-4 max-w-md mx-auto">
+    <div class="mt-12 flex flex-wrap justify-center gap-4 max-w-3xl mx-auto">
       <div class="flex-1 min-w-[140px] bg-slate-900 border border-slate-800 rounded-xl p-6 text-center">
         <div class="text-4xl font-bold text-cyan-400 mb-1"><%= verifiedUsers %></div>
         <div class="text-sm text-gray-500">Verified users</div>
@@ -51,6 +51,10 @@
       <div class="flex-1 min-w-[140px] bg-slate-900 border border-slate-800 rounded-xl p-6 text-center">
         <div class="text-4xl font-bold text-purple-400 mb-1"><%= verifiedGroups %></div>
         <div class="text-sm text-gray-500">Active groups</div>
+      </div>
+      <div class="flex-1 min-w-[140px] bg-slate-900 border border-slate-800 rounded-xl p-6 text-center">
+        <div class="text-4xl font-bold text-emerald-400 mb-1"><%= membersProcessed %></div>
+        <div class="text-sm text-gray-500">Members processed</div>
       </div>
     </div>
   </div>
