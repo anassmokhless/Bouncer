@@ -184,30 +184,79 @@ export async function checkNftOwnership(
 ): Promise<boolean | null> {
   try {
     if (tokenId) {
-      // Specific token: use bulkFilter for exact match
+      // Specific token: filter by collectionId at query time, then match tokenId
+      // client-side. We previously used `bulkFilter: [{collectionId, tokenIds}]`
+      // but that filter does NOT scope results to wallet ownership — it returns
+      // token info (balance seemingly from a default/aggregate source) regardless
+      // of whether the wallet actually holds the token. Result: every wallet
+      // looked like a holder, silently breaking every token-specific rule.
+      // collectionIds DOES filter by ownership correctly.
       const q = gql`
-        query GetWallet($address: String!, $bulkFilter: [TokenFilterInput!]) {
+        query GetWallet($address: String!, $collectionIds: [BigInt!], $after: String) {
           GetWallet(account: $address) {
-            tokenAccounts(first: 1, bulkFilter: $bulkFilter) {
+            tokenAccounts(first: 100, collectionIds: $collectionIds, after: $after) {
               edges {
                 node {
                   balance
+                  token {
+                    tokenId
+                  }
                 }
+              }
+              pageInfo {
+                hasNextPage
+                endCursor
               }
             }
           }
         }
       `;
 
-      const data = await getClient().request<GetWalletResponse>(q, {
-        address: walletAddress,
-        bulkFilter: [{ collectionId, tokenIds: [tokenId] }],
-      });
+      const MAX_PAGES = 50;
+      let pageCount = 0;
+      let hasNextPage = true;
+      let afterCursor: string | null = null;
 
-      if (!data.GetWallet) return false;
-      const edges = data.GetWallet.tokenAccounts.edges;
-      if (edges.length === 0) return false;
-      return parseInt(edges[0].node.balance) >= minBalance;
+      type TokenSpecificResponse = {
+        GetWallet: {
+          tokenAccounts: {
+            edges: Array<{ node: { balance: string; token: { tokenId: string } } }>;
+            pageInfo?: { hasNextPage: boolean; endCursor: string | null };
+          };
+        } | null;
+      };
+
+      while (hasNextPage && pageCount < MAX_PAGES) {
+        const data: TokenSpecificResponse = await getClient().request<TokenSpecificResponse>(q, {
+          address: walletAddress,
+          collectionIds: [collectionId],
+          after: afterCursor,
+        });
+
+        if (!data.GetWallet) return false;
+
+        for (const edge of data.GetWallet.tokenAccounts.edges) {
+          if (edge.node.token.tokenId === tokenId) {
+            return parseInt(edge.node.balance) >= minBalance;
+          }
+        }
+
+        hasNextPage = data.GetWallet.tokenAccounts.pageInfo?.hasNextPage ?? false;
+        afterCursor = data.GetWallet.tokenAccounts.pageInfo?.endCursor ?? null;
+        pageCount++;
+      }
+
+      if (hasNextPage) {
+        // Hit page cap without finding the token — can't fairly decide, same
+        // null semantics as the collection-only branch.
+        console.warn(
+          `[ENJIN] Pagination cap (${MAX_PAGES} pages) hit for token-specific check on ${walletAddress} in collection ${collectionId} (tokenId ${tokenId}) — returning null`,
+        );
+        return null;
+      }
+
+      // Iterated all pages, token not found → wallet doesn't hold it.
+      return false;
     } else {
       // Any token in collection: sum all balances with pagination
       const q = gql`
