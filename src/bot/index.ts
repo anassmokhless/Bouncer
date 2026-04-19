@@ -16,6 +16,7 @@ import { handleNewMembers } from "./handlers/new-member.js";
 import { handleBotAdded } from "./handlers/bot-added.js";
 import { handleMemberLeft, handleAdminDemoted } from "./handlers/member-left.js";
 import { handleExistingMember } from "./handlers/existing-member.js";
+import { handleChatMigration } from "./handlers/migrate.js";
 import { startCronJobs } from "./cron.js";
 
 const bot = new Bot(process.env.BOT_TOKEN!);
@@ -83,6 +84,10 @@ bot.on("chat_member", async (ctx) => {
   }
 });
 bot.on(":new_chat_members", handleNewMembers);
+// basic → supergroup migration. Must be registered BEFORE the generic "message"
+// handler so we update the DB's telegram_id before any other message-path runs
+// (otherwise handleExistingMember would fail to find the group by new chat_id).
+bot.on("message:migrate_from_chat_id", handleChatMigration);
 bot.on("message", handleExistingMember);
 
 bot.catch((err) => {
