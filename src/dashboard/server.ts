@@ -14,7 +14,6 @@ import cookieParser from "cookie-parser";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import { pool } from "../shared/db.js";
-import { query } from "../shared/db.js";
 import authRoutes from "./routes/auth.js";
 import groupsRoutes from "./routes/groups.js";
 import auditRoutes from "./routes/audit.js";
@@ -131,26 +130,9 @@ app.get("/login", (req, res) => {
   });
 });
 
-// Landing page — fetches live counts from DB on each request.
-app.get("/", async (_req, res, next) => {
-  try {
-    const [usersResult, groupsResult] = await Promise.all([
-      query<{ c: number }>(
-        `SELECT COUNT(*)::int AS c FROM users
-         WHERE is_verified = true AND wallet_address IS NOT NULL`,
-      ),
-      query<{ c: number }>(
-        `SELECT COUNT(*)::int AS c FROM groups WHERE is_active = true`,
-      ),
-    ]);
-    res.render("landing", {
-      botUsername: process.env.BOT_USERNAME,
-      verifiedUsers: usersResult.rows[0].c,
-      verifiedGroups: groupsResult.rows[0].c,
-    });
-  } catch (err) {
-    next(err);
-  }
+// Landing page
+app.get("/", (req, res) => {
+  res.render("landing", { botUsername: process.env.BOT_USERNAME });
 });
 
 // Legal page (privacy policy + terms of use)
