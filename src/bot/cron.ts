@@ -256,15 +256,23 @@ async function pollPendingVerifications(bot: Bot) {
       await client.query(`DELETE FROM pending_verifications WHERE id = $1`, [row.id]);
 
       for (const vg of verifiedGroups) {
-        await client.query(
-          `UPDATE members SET status = 'VERIFIED', last_checked = now() WHERE id = $1`,
+        // Guarded UPDATE: only flip PENDING/VERIFIED → VERIFIED. If the user
+        // left (or was kicked) between the NFT-check loop above and this
+        // transaction, members.status is now LEFT/KICKED and we'd otherwise
+        // overwrite with VERIFIED — inconsistent with reality + spurious
+        // USER_VERIFIED audit entry. Same race-class as the kick-cron fixes.
+        const updateResult = await client.query(
+          `UPDATE members SET status = 'VERIFIED', last_checked = now()
+           WHERE id = $1 AND status IN ('PENDING', 'VERIFIED')`,
           [vg.memberId],
         );
-        await client.query(
-          `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-          [vg.groupId, row.user_id, "USER_VERIFIED",
-           JSON.stringify({ walletAddress, collectionId: vg.collectionId, tokenId: vg.tokenId })],
-        );
+        if ((updateResult.rowCount ?? 0) > 0) {
+          await client.query(
+            `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
+            [vg.groupId, row.user_id, "USER_VERIFIED",
+             JSON.stringify({ walletAddress, collectionId: vg.collectionId, tokenId: vg.tokenId })],
+          );
+        }
       }
 
       await client.query("COMMIT");
