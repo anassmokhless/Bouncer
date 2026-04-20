@@ -439,14 +439,25 @@ async function recheckVerifiedMembers(bot: Bot) {
         }
 
         if (kickSuccess) {
+          // Same status-guard pattern as kickExpiredPendingMembers: only flip
+          // VERIFIED → KICKED. If handleMemberLeft already committed LEFT
+          // (user voluntarily left between the recheck SELECT and this UPDATE),
+          // skip the UPDATE and audit log to avoid double-logging.
+          let didKick = false;
           const client = await pool.connect();
           try {
             await client.query("BEGIN");
-            await client.query(`UPDATE members SET status = 'KICKED', last_checked = now() WHERE id = $1`, [member.memberId]);
-            await client.query(
-              `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-              [member.groupId, member.userId, "USER_KICKED", JSON.stringify({ reason: "NFT no longer held" })],
+            const updateResult = await client.query(
+              `UPDATE members SET status = 'KICKED', last_checked = now() WHERE id = $1 AND status = 'VERIFIED'`,
+              [member.memberId],
             );
+            if ((updateResult.rowCount ?? 0) > 0) {
+              await client.query(
+                `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
+                [member.groupId, member.userId, "USER_KICKED", JSON.stringify({ reason: "NFT no longer held" })],
+              );
+              didKick = true;
+            }
             await client.query("COMMIT");
           } catch (err) {
             await client.query("ROLLBACK");
@@ -455,10 +466,11 @@ async function recheckVerifiedMembers(bot: Bot) {
             client.release();
           }
 
-          // Clear from existing-member cache so they get re-checked if they rejoin
-          removeCheckedPair(member.groupTelegramId, member.userTelegramId);
-
-          kickedCount++;
+          if (didKick) {
+            // Clear from existing-member cache so they get re-checked if they rejoin
+            removeCheckedPair(member.groupTelegramId, member.userTelegramId);
+            kickedCount++;
+          }
         }
       }
     }));
@@ -502,15 +514,27 @@ async function kickExpiredPendingMembers(bot: Bot) {
 
     if (!kickSuccess) continue;
 
+    // Guarded UPDATE: only flip PENDING → KICKED. If the user left voluntarily
+    // between our SELECT (top of the loop) and this UPDATE, members.status is
+    // now LEFT and we'd otherwise overwrite it + log a spurious USER_KICKED on
+    // top of the existing USER_LEFT. Same-class race as handleMemberLeft's
+    // fix; guarding both sides makes whichever transaction commits first win.
+    let didKick = false;
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query(`UPDATE members SET status = 'KICKED' WHERE id = $1`, [row.id]);
-      await client.query(
-        `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-        [row.group_id, row.user_id, isBan ? "USER_BANNED" : "USER_KICKED",
-         JSON.stringify({ reason: isBan ? "Banned after 5 failed verifications" : "Verification timeout" })],
+      const updateResult = await client.query(
+        `UPDATE members SET status = 'KICKED' WHERE id = $1 AND status = 'PENDING'`,
+        [row.id],
       );
+      if ((updateResult.rowCount ?? 0) > 0) {
+        await client.query(
+          `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
+          [row.group_id, row.user_id, isBan ? "USER_BANNED" : "USER_KICKED",
+           JSON.stringify({ reason: isBan ? "Banned after 5 failed verifications" : "Verification timeout" })],
+        );
+        didKick = true;
+      }
       await client.query("COMMIT");
     } catch (err) {
       await client.query("ROLLBACK");
@@ -519,10 +543,11 @@ async function kickExpiredPendingMembers(bot: Bot) {
       client.release();
     }
 
-    // Clear from existing-member cache so they get re-checked if they rejoin
-    removeCheckedPair(row.group_telegram_id, row.user_telegram_id);
-
-    console.log(`[CRON] ${isBan ? "Banned" : "Kicked"} expired: ${row.user_telegram_id} from ${row.group_telegram_id}`);
+    if (didKick) {
+      // Clear from existing-member cache so they get re-checked if they rejoin
+      removeCheckedPair(row.group_telegram_id, row.user_telegram_id);
+      console.log(`[CRON] ${isBan ? "Banned" : "Kicked"} expired: ${row.user_telegram_id} from ${row.group_telegram_id}`);
+    }
   }
 }
 

@@ -47,28 +47,39 @@ export async function handleMemberLeft(ctx: Context) {
   const telegramId = update.new_chat_member.user.id.toString();
   const chatId = ctx.chat.id.toString();
 
-  // Find the member in our database
-  const result = await query(
-    `SELECT m.id, m.group_id, u.id AS user_id
-     FROM members m
-     JOIN groups g ON g.id = m.group_id
-     JOIN users u ON u.id = m.user_id
-     WHERE g.telegram_id = $1 AND u.telegram_id = $2 AND m.status IN ('VERIFIED', 'PENDING')`,
-    [chatId, telegramId],
-  );
-
-  if (result.rows.length === 0) return;
-
-  const member = result.rows[0];
-
+  // Atomic UPDATE...RETURNING with a status guard. The guard prevents a race
+  // where a kick cron has already committed status=KICKED and the Telegram
+  // API response to its own banChatMember call triggers THIS chat_member
+  // event. Without the guard we'd overwrite KICKED → LEFT and insert a
+  // spurious USER_LEFT audit entry on top of the cron's USER_KICKED.
+  // Splitting the SELECT from the UPDATE also allowed cron's COMMIT to slip
+  // in between them; merging the two into one atomic statement closes the gap.
+  let didUpdate = false;
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query(`UPDATE members SET status = 'LEFT' WHERE id = $1`, [member.id]);
-    await client.query(
-      `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-      [member.group_id, member.user_id, "USER_LEFT", JSON.stringify({ telegramId })],
+
+    const result = await client.query(
+      `UPDATE members SET status = 'LEFT'
+       FROM groups g, users u
+       WHERE members.group_id = g.id
+         AND members.user_id = u.id
+         AND g.telegram_id = $1
+         AND u.telegram_id = $2
+         AND members.status IN ('VERIFIED', 'PENDING')
+       RETURNING members.id, members.group_id, members.user_id`,
+      [chatId, telegramId],
     );
+
+    if (result.rows.length > 0) {
+      const member = result.rows[0];
+      await client.query(
+        `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
+        [member.group_id, member.user_id, "USER_LEFT", JSON.stringify({ telegramId })],
+      );
+      didUpdate = true;
+    }
+
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK");
@@ -77,8 +88,9 @@ export async function handleMemberLeft(ctx: Context) {
     client.release();
   }
 
-  // Clear from existing-member cache so they get re-checked if they rejoin
-  removeCheckedPair(chatId, telegramId);
-
-  console.log(`[BOT] Member ${telegramId} left group ${chatId}`);
+  if (didUpdate) {
+    // Clear from existing-member cache so they get re-checked if they rejoin
+    removeCheckedPair(chatId, telegramId);
+    console.log(`[BOT] Member ${telegramId} left group ${chatId}`);
+  }
 }
