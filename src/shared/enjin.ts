@@ -138,18 +138,20 @@ export async function tokenExists(
   collectionId: string,
   tokenId: string,
 ): Promise<boolean | null> {
+  // Enjin's Token.tokenId output field is a BigInt scalar — sub-selection
+  // (e.g. `tokenId { integer }`) throws a schema error. The INPUT type
+  // EncodableTokenIdInput still accepts `{integer: ...}` — only the output
+  // is scalar. Asking for just `tokenId` is enough to confirm existence.
   const q = gql`
     query GetToken($collectionId: BigInt!, $tokenId: EncodableTokenIdInput!) {
       GetToken(collectionId: $collectionId, tokenId: $tokenId) {
-        tokenId {
-          integer
-        }
+        tokenId
       }
     }
   `;
   try {
     const data = await getClient().request<{
-      GetToken: { tokenId: { integer: string } } | null;
+      GetToken: { tokenId: string } | null;
     }>(q, { collectionId, tokenId: { integer: tokenId } });
     return data.GetToken !== null;
   } catch (err) {
