@@ -1,36 +1,36 @@
 <%- include('partials/head', { title: 'Dashboard — Bouncer' }) %>
-<%- include('partials/nav') %>
+<%- include('partials/nav-app', { active: 'groups' }) %>
 
 <div class="max-w-6xl mx-auto px-4 py-8">
   <h1 class="text-2xl font-bold mb-6">Your Groups</h1>
 
   <% if (typeof accessError !== 'undefined' && accessError) { %>
-    <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-4 flex items-start gap-2">
-      <svg class="w-5 h-5 text-red-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div class="bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-lg p-3 mb-4 flex items-start gap-2">
+      <svg class="w-5 h-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"></path>
       </svg>
-      <p class="text-red-400 text-sm"><%= accessError %></p>
+      <p class="text-red-700 dark:text-red-400 text-sm"><%= accessError %></p>
     </div>
   <% } %>
 
   <% if (groups.length === 0) { %>
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 text-gray-400">
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-slate-600 dark:text-gray-400 shadow-sm">
       You don't manage any groups yet. Add the bot to your Telegram group to get started.
     </div>
   <% } else { %>
     <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
       <% groups.forEach(group => { %>
         <a href="/dashboard/<%= group.id %>" class="block">
-          <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 hover:border-cyan-500/50 transition-colors">
-            <h2 class="font-semibold text-lg mb-3 text-gray-100"><%= group.title %></h2>
+          <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm hover:border-cyan-500/50 transition-colors">
+            <h2 class="font-semibold text-lg mb-3 text-slate-900 dark:text-gray-100"><%= group.title %></h2>
             <div class="flex gap-2 flex-wrap">
-              <span class="bg-emerald-500/15 text-emerald-400 text-xs px-2 py-1 rounded-full">
+              <span class="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-xs px-2 py-1 rounded-full">
                 <%= group.verified_count %> verified
               </span>
-              <span class="bg-purple-500/15 text-purple-400 text-xs px-2 py-1 rounded-full">
+              <span class="bg-purple-500/15 text-purple-600 dark:text-purple-400 text-xs px-2 py-1 rounded-full">
                 <%= group.rule_count %> rules
               </span>
-              <span class="<%= group.is_active ? 'bg-cyan-500/15 text-cyan-400' : 'bg-red-500/15 text-red-400' %> text-xs px-2 py-1 rounded-full">
+              <span class="<%= group.is_active ? 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400' : 'bg-red-500/15 text-red-600 dark:text-red-400' %> text-xs px-2 py-1 rounded-full">
                 <%= group.is_active ? 'Active' : 'Inactive' %>
               </span>
             </div>

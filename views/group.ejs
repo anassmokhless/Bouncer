@@ -1,66 +1,107 @@
 <%- include('partials/head', { title: group.title + ' — Bouncer' }) %>
-<%- include('partials/nav') %>
+<%- include('partials/nav-app', { active: 'groups' }) %>
+
+<%# Helpers voor de sorteerbare members-tabel. sort komt als 'col-dir' (bv.
+    'status-desc'). sortHref berekent de URL voor een kolom-header: als
+    diezelfde kolom al actief is, toggle asc↔desc; anders default op desc.
+    sortArrow geeft het pijltje voor de actieve kolom. paginationHref
+    bouwt de prev/next URLs met sort + search preserved zodat je niet
+    per ongeluk terugvalt op default bij paginatie. Sort wordt NIET
+    gepreserved bij search-submit (aparte keuze — simpeler UX). %>
+<%
+  const currSort = typeof sort === 'string' ? sort : 'joined-desc';
+  const [sortCol, sortDir] = currSort.split('-');
+
+  function sortHref(col) {
+    const nextDir = (sortCol === col && sortDir === 'desc') ? 'asc' : 'desc';
+    const params = new URLSearchParams();
+    params.set('sort', col + '-' + nextDir);
+    if (search) params.set('search', search);
+    return '?' + params.toString();
+  }
+
+  function sortArrow(col) {
+    if (sortCol !== col) return '';
+    return sortDir === 'asc' ? '↑' : '↓';
+  }
+
+  function paginationHref(pageNum) {
+    const params = new URLSearchParams();
+    params.set('page', pageNum.toString());
+    if (search) params.set('search', search);
+    if (currSort !== 'joined-desc') params.set('sort', currSort);
+    return '/dashboard/' + group.id + '?' + params.toString();
+  }
+%>
 
 <div class="max-w-6xl mx-auto px-4 py-8">
   <div class="flex items-center justify-between mb-6">
     <div>
-      <a href="/dashboard" class="text-sm text-gray-500 hover:text-cyan-400 transition-colors">&larr; Back to Groups</a>
-      <h1 class="text-2xl font-bold mt-1"><%= group.title %></h1>
-      <p class="text-sm text-gray-500">Telegram ID: <%= group.telegram_id %></p>
+      <a href="/dashboard"
+         class="inline-flex items-center gap-1.5 bg-transparent text-cyan-600 dark:text-cyan-400 border border-cyan-600 dark:border-cyan-400 hover:bg-cyan-600/10 dark:hover:bg-cyan-400/10 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors">
+        &larr; Back to Groups
+      </a>
+      <h1 class="text-2xl font-bold mt-3"><%= group.title %></h1>
+      <p class="text-sm text-slate-500 dark:text-gray-500">Telegram ID: <%= group.telegram_id %></p>
     </div>
     <div class="flex items-center gap-3">
-      <span id="recheck-result" class="text-sm text-gray-400"></span>
+      <span id="recheck-result" class="text-sm text-slate-600 dark:text-gray-400"></span>
       <button onclick="recheckAll()" id="recheck-btn"
-              class="bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-cyan-500 transition-colors">
+              class="bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-cyan-700 dark:hover:bg-cyan-500 transition-colors">
         Re-check NFTs
       </button>
     </div>
   </div>
 
   <% if (typeof accessError !== 'undefined' && accessError) { %>
-    <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-6 flex items-start gap-2">
-      <svg class="w-5 h-5 text-red-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div class="bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-lg p-3 mb-6 flex items-start gap-2">
+      <svg class="w-5 h-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"></path>
       </svg>
-      <p class="text-red-400 text-sm"><%= accessError %></p>
+      <p class="text-red-700 dark:text-red-400 text-sm"><%= accessError %></p>
     </div>
   <% } %>
 
   <div class="grid gap-4 md:grid-cols-3 mb-8">
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
-      <p class="text-sm text-gray-500">Verified Members</p>
-      <p class="text-2xl font-bold text-emerald-400"><%= stats.VERIFIED || 0 %></p>
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm">
+      <p class="text-sm text-slate-500 dark:text-gray-500">Verified Members</p>
+      <p class="text-2xl font-bold text-emerald-600 dark:text-emerald-400"><%= stats.VERIFIED || 0 %></p>
     </div>
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
-      <p class="text-sm text-gray-500">Pending Members</p>
-      <p class="text-2xl font-bold text-amber-400"><%= stats.PENDING || 0 %></p>
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm">
+      <p class="text-sm text-slate-500 dark:text-gray-500">Pending Members</p>
+      <p class="text-2xl font-bold text-amber-600 dark:text-amber-400"><%= stats.PENDING || 0 %></p>
     </div>
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
-      <p class="text-sm text-gray-500">Active Rules</p>
-      <p class="text-2xl font-bold text-purple-400"><%= rules.length %></p>
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm">
+      <p class="text-sm text-slate-500 dark:text-gray-500">Active Rules</p>
+      <p class="text-2xl font-bold text-purple-600 dark:text-purple-400"><%= rules.length %></p>
     </div>
   </div>
 
-  <div class="bg-slate-900 border border-slate-800 rounded-xl mb-8">
-    <div class="px-5 py-4 border-b border-slate-800"><h2 class="font-semibold text-cyan-400">NFT Rules</h2></div>
+  <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl mb-8 shadow-sm">
+    <div class="px-5 py-4 border-b border-slate-200 dark:border-slate-800"><h2 class="font-semibold text-cyan-600 dark:text-cyan-400">NFT Rules</h2></div>
     <% if (rules.length === 0) { %>
-      <p class="p-5 text-gray-500">No rules configured yet.</p>
+      <p class="p-5 text-slate-500 dark:text-gray-500">No rules configured yet.</p>
     <% } else { %>
       <div class="overflow-x-auto">
-        <table class="w-full text-sm">
+        <%# Inline table-layout:fixed + explicit col widths zodat de kolommen
+            exact 1/5 breedte hebben. De add-rule form eronder gebruikt een
+            grid met dezelfde 5 kolommen, zodat inputs perfect onder hun
+            header-labels vallen. Tailwind v4 output bevat geen table-fixed
+            of fractional widths, dus inline styles om een rebuild te vermijden. %>
+        <table class="w-full text-sm" style="table-layout: fixed;">
           <thead>
-            <tr class="border-b border-slate-800 text-left">
-              <th class="px-5 py-3 font-medium text-gray-400">Collection ID</th>
-              <th class="px-5 py-3 font-medium text-gray-400">Token ID</th>
-              <th class="px-5 py-3 font-medium text-gray-400">Min Balance</th>
-              <th class="px-5 py-3 font-medium text-gray-400">Check Interval</th>
-              <th class="px-5 py-3"></th>
+            <tr class="border-b border-slate-200 dark:border-slate-800 text-left">
+              <th class="px-5 py-3 font-medium text-slate-600 dark:text-gray-400" style="width: 20%;">Collection ID</th>
+              <th class="px-5 py-3 font-medium text-slate-600 dark:text-gray-400" style="width: 20%;">Token ID</th>
+              <th class="px-5 py-3 font-medium text-slate-600 dark:text-gray-400" style="width: 20%;">Min Balance</th>
+              <th class="px-5 py-3 font-medium text-slate-600 dark:text-gray-400" style="width: 20%;">Check Interval</th>
+              <th class="px-5 py-3" style="width: 20%;"></th>
             </tr>
           </thead>
           <tbody>
             <% rules.forEach(rule => { %>
-              <tr class="border-b border-slate-800">
-                <td class="px-5 py-3 font-mono text-xs text-purple-300"><%= rule.collection_id %></td>
+              <tr class="border-b border-slate-200 dark:border-slate-800">
+                <td class="px-5 py-3 font-mono text-xs text-purple-700 dark:text-purple-300"><%= rule.collection_id %></td>
                 <td class="px-5 py-3"><%= rule.token_id || 'Any' %></td>
                 <td class="px-5 py-3"><%= rule.min_balance %></td>
                 <td class="px-5 py-3"><%= rule.check_interval_seconds / 3600 %>h</td>
@@ -68,7 +109,7 @@
                   <form action="/dashboard/<%= group.id %>/rules/<%= rule.id %>/delete" method="POST"
                         onsubmit="return confirm('Remove this rule?')">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                    <button type="submit" class="text-red-400 hover:text-red-300 text-xs transition-colors">Remove</button>
+                    <button type="submit" class="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 text-xs transition-colors">Remove</button>
                   </form>
                 </td>
               </tr>
@@ -79,88 +120,117 @@
     <% } %>
 
     <!-- Add rule form -->
-    <div class="px-5 py-4 border-t border-slate-800">
+    <div class="px-5 py-4 border-t border-slate-200 dark:border-slate-800">
       <% if (typeof ruleError !== 'undefined' && ruleError) { %>
-        <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-3 flex items-start gap-2">
-          <svg class="w-5 h-5 text-red-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div class="bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-lg p-3 mb-3 flex items-start gap-2">
+          <svg class="w-5 h-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"></path>
           </svg>
-          <p class="text-red-400 text-sm"><%= ruleError %></p>
+          <p class="text-red-700 dark:text-red-400 text-sm"><%= ruleError %></p>
         </div>
       <% } %>
-      <form action="/dashboard/<%= group.id %>/rules" method="POST" class="flex flex-wrap items-end gap-3">
+      <%# Grid met 5 gelijke 1fr kolommen — exact dezelfde verdeling als de
+          tabel-kolommen erboven. De 4 input-velden nemen elk één cel,
+          de Add Rule button de 5e (ter plaatse van de Remove-kolom). %>
+      <form action="/dashboard/<%= group.id %>/rules" method="POST"
+            style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; align-items: end;">
         <input type="hidden" name="_csrf" value="<%= csrfToken %>">
         <div>
-          <label class="block text-xs text-gray-500 mb-1">Collection ID *</label>
+          <label class="block text-xs text-slate-500 dark:text-gray-500 mb-1">Collection ID *</label>
           <input type="text" name="collectionId" required placeholder="e.g. 36105"
-                 class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-cyan-500 w-36">
+                 class="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-gray-100 placeholder-slate-400 dark:placeholder-gray-500 focus:outline-none focus:border-cyan-500 w-full">
         </div>
         <div>
-          <label class="block text-xs text-gray-500 mb-1">Token ID</label>
+          <label class="block text-xs text-slate-500 dark:text-gray-500 mb-1">Token ID</label>
           <input type="text" name="tokenId" placeholder="Any"
-                 class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-cyan-500 w-28">
+                 class="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-gray-100 placeholder-slate-400 dark:placeholder-gray-500 focus:outline-none focus:border-cyan-500 w-full">
         </div>
         <div>
-          <label class="block text-xs text-gray-500 mb-1">Min Balance</label>
+          <label class="block text-xs text-slate-500 dark:text-gray-500 mb-1">Min Balance</label>
           <input type="number" name="minBalance" value="1" min="1"
-                 class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-cyan-500 w-20">
+                 class="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-gray-100 focus:outline-none focus:border-cyan-500 w-full">
         </div>
         <div>
-          <label class="block text-xs text-gray-500 mb-1">Check Interval (hours)</label>
+          <label class="block text-xs text-slate-500 dark:text-gray-500 mb-1">Check Interval (hours)</label>
           <input type="number" name="checkInterval" value="1" min="1" step="1"
-                 class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-cyan-500 w-20">
+                 class="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-gray-100 focus:outline-none focus:border-cyan-500 w-full">
         </div>
         <button type="submit"
-                class="bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-cyan-500 transition-colors">
+                class="bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-cyan-700 dark:hover:bg-cyan-500 transition-colors">
           Add Rule
         </button>
       </form>
-      <p class="text-xs text-gray-500 mt-2">*Leave Token ID empty to allow any token from the collection.</p>
+      <p class="text-xs text-slate-500 dark:text-gray-500 mt-2">*Leave Token ID empty to allow any token from the collection.</p>
     </div>
   </div>
 
-  <div class="bg-slate-900 border border-slate-800 rounded-xl">
-    <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between flex-wrap gap-3">
-      <h2 class="font-semibold text-cyan-400">Members (<%= totalMembers %>)</h2>
+  <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm">
+    <div class="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between flex-wrap gap-3">
+      <h2 class="font-semibold text-cyan-600 dark:text-cyan-400">Members (<%= totalMembers %>)</h2>
       <form method="GET" action="/dashboard/<%= group.id %>" class="flex items-center gap-2">
-        <input type="text" name="search" value="<%= search %>" placeholder="Search username..."
-               class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-cyan-500 w-48">
-        <button type="submit" class="bg-slate-700 text-gray-300 px-3 py-1.5 rounded-lg text-sm hover:bg-slate-600 transition-colors">Search</button>
+        <input type="text" name="search" value="<%= search %>" placeholder="Search username or wallet..."
+               class="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-900 dark:text-gray-100 placeholder-slate-400 dark:placeholder-gray-500 focus:outline-none focus:border-cyan-500 w-48">
+        <button type="submit" class="bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-gray-300 border border-slate-200 dark:border-transparent px-3 py-1.5 rounded-lg text-sm hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">Search</button>
         <% if (search) { %>
-          <a href="/dashboard/<%= group.id %>" class="text-xs text-gray-500 hover:text-gray-300 transition-colors">Clear</a>
+          <a href="/dashboard/<%= group.id %>" class="text-xs text-slate-500 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-300 transition-colors">Clear</a>
         <% } %>
       </form>
     </div>
     <% if (members.length === 0) { %>
-      <p class="p-5 text-gray-500"><%= search ? 'No members found.' : 'No members yet.' %></p>
+      <p class="p-5 text-slate-500 dark:text-gray-500"><%= search ? 'No members found.' : 'No members yet.' %></p>
     <% } else { %>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead>
-            <tr class="border-b border-slate-800 text-left">
-              <th class="px-5 py-3 font-medium text-gray-400">User</th>
-              <th class="px-5 py-3 font-medium text-gray-400">Wallet</th>
-              <th class="px-5 py-3 font-medium text-gray-400">Status</th>
-              <th class="px-5 py-3 font-medium text-gray-400">Last Checked</th>
-              <th class="px-5 py-3 font-medium text-gray-400">Joined</th>
+            <tr class="border-b border-slate-200 dark:border-slate-800 text-left">
+              <th class="px-5 py-3 font-medium text-slate-600 dark:text-gray-400">
+                <a href="<%= sortHref('user') %>" class="inline-flex items-center gap-1 hover:text-slate-900 dark:hover:text-gray-200 transition-colors">
+                  User<% if (sortArrow('user')) { %><span class="text-cyan-600 dark:text-cyan-400"><%= sortArrow('user') %></span><% } %>
+                </a>
+              </th>
+              <th class="px-5 py-3 font-medium text-slate-600 dark:text-gray-400">
+                <a href="<%= sortHref('wallet') %>" class="inline-flex items-center gap-1 hover:text-slate-900 dark:hover:text-gray-200 transition-colors">
+                  Wallet<% if (sortArrow('wallet')) { %><span class="text-cyan-600 dark:text-cyan-400"><%= sortArrow('wallet') %></span><% } %>
+                </a>
+              </th>
+              <th class="px-5 py-3 font-medium text-slate-600 dark:text-gray-400">
+                <a href="<%= sortHref('status') %>" class="inline-flex items-center gap-1 hover:text-slate-900 dark:hover:text-gray-200 transition-colors">
+                  Status<% if (sortArrow('status')) { %><span class="text-cyan-600 dark:text-cyan-400"><%= sortArrow('status') %></span><% } %>
+                </a>
+              </th>
+              <th class="px-5 py-3 font-medium text-slate-600 dark:text-gray-400">
+                <a href="<%= sortHref('checked') %>" class="inline-flex items-center gap-1 hover:text-slate-900 dark:hover:text-gray-200 transition-colors">
+                  Last Checked<% if (sortArrow('checked')) { %><span class="text-cyan-600 dark:text-cyan-400"><%= sortArrow('checked') %></span><% } %>
+                </a>
+              </th>
+              <th class="px-5 py-3 font-medium text-slate-600 dark:text-gray-400">
+                <a href="<%= sortHref('joined') %>" class="inline-flex items-center gap-1 hover:text-slate-900 dark:hover:text-gray-200 transition-colors">
+                  Joined<% if (sortArrow('joined')) { %><span class="text-cyan-600 dark:text-cyan-400"><%= sortArrow('joined') %></span><% } %>
+                </a>
+              </th>
             </tr>
           </thead>
           <tbody>
-            <% const statusColors = { VERIFIED: 'bg-emerald-500/15 text-emerald-400', PENDING: 'bg-amber-500/15 text-amber-400', KICKED: 'bg-red-500/15 text-red-400', LEFT: 'bg-gray-500/15 text-gray-400' }; %>
+            <% const statusColors = {
+              VERIFIED: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
+              PENDING: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+              KICKED: 'bg-red-500/15 text-red-600 dark:text-red-400',
+              LEFT: 'bg-gray-500/15 text-gray-600 dark:text-gray-400'
+            }; %>
             <% members.forEach(member => { %>
-              <tr class="border-b border-slate-800">
+              <tr class="border-b border-slate-200 dark:border-slate-800">
                 <td class="px-5 py-3">
-                  <p class="font-medium text-gray-100"><%= member.first_name || member.username || 'Unknown' %></p>
-                  <% if (member.username) { %><p class="text-xs text-gray-500">@<%= member.username %></p><% } %>
+                  <p class="font-medium text-slate-900 dark:text-gray-100"><%= member.first_name || member.username || 'Unknown' %></p>
+                  <% if (member.username) { %><p class="text-xs text-slate-500 dark:text-gray-500">@<%= member.username %></p><% } %>
                 </td>
-                <td class="px-5 py-3 font-mono text-xs text-purple-300"><%= member.wallet_address || 'Not linked' %></td>
+                <td class="px-5 py-3 font-mono text-xs text-purple-700 dark:text-purple-300"><%= member.wallet_address || 'Not linked' %></td>
                 <td class="px-5 py-3">
-                  <span class="<%= statusColors[member.status] || 'bg-gray-500/15 text-gray-400' %> text-xs px-2 py-1 rounded-full">
+                  <span class="<%= statusColors[member.status] || 'bg-gray-500/15 text-gray-600 dark:text-gray-400' %> text-xs px-2 py-1 rounded-full">
                     <%= member.status %>
                   </span>
                 </td>
-                <td class="px-5 py-3 text-gray-500" data-date="<%= member.last_checked || '' %>"></td>
-                <td class="px-5 py-3 text-gray-500" data-date="<%= member.created_at %>"></td>
+                <td class="px-5 py-3 text-slate-500 dark:text-gray-500" data-date="<%= member.last_checked || '' %>"></td>
+                <td class="px-5 py-3 text-slate-500 dark:text-gray-500" data-date="<%= member.created_at %>"></td>
               </tr>
             <% }) %>
           </tbody>
@@ -168,16 +238,16 @@
       </div>
     <% } %>
     <% if (totalPages > 1) { %>
-      <div class="px-5 py-4 border-t border-slate-800 flex items-center justify-between">
-        <p class="text-sm text-gray-500">Page <%= page %> of <%= totalPages %></p>
+      <div class="px-5 py-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+        <p class="text-sm text-slate-500 dark:text-gray-500">Page <%= page %> of <%= totalPages %></p>
         <div class="flex gap-2">
           <% if (page > 1) { %>
-            <a href="/dashboard/<%= group.id %>?page=<%= page - 1 %><%= search ? '&search=' + encodeURIComponent(search) : '' %>"
-               class="bg-slate-800 text-gray-300 px-3 py-1.5 rounded-lg text-sm hover:bg-slate-700 transition-colors">&larr; Prev</a>
+            <a href="<%= paginationHref(page - 1) %>"
+               class="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-gray-300 border border-slate-200 dark:border-transparent px-3 py-1.5 rounded-lg text-sm hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">&larr; Prev</a>
           <% } %>
           <% if (page < totalPages) { %>
-            <a href="/dashboard/<%= group.id %>?page=<%= page + 1 %><%= search ? '&search=' + encodeURIComponent(search) : '' %>"
-               class="bg-slate-800 text-gray-300 px-3 py-1.5 rounded-lg text-sm hover:bg-slate-700 transition-colors">Next &rarr;</a>
+            <a href="<%= paginationHref(page + 1) %>"
+               class="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-gray-300 border border-slate-200 dark:border-transparent px-3 py-1.5 rounded-lg text-sm hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">Next &rarr;</a>
           <% } %>
         </div>
       </div>

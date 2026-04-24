@@ -1,60 +1,46 @@
 <%- include('partials/head', { title: 'Bouncer — Token-Gated Telegram Communities' }) %>
-
-<!-- Landing nav (public, no user session) -->
-<nav class="bg-slate-900/80 border-b border-slate-800 backdrop-blur-sm sticky top-0 z-50">
-  <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-    <div class="flex items-center gap-2">
-      <img src="/images/logo.png" alt="Bouncer" class="w-8 h-8 rounded-lg">
-      <span class="text-lg font-bold text-cyan-400">Bouncer</span>
-    </div>
-    <div class="flex items-center gap-4">
-      <a href="/contact" class="text-sm text-gray-400 hover:text-cyan-400 transition-colors">Contact</a>
-      <a href="/legal" class="text-sm text-gray-400 hover:text-cyan-400 transition-colors">Legal</a>
-      <a href="/dashboard" class="bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-cyan-500 transition-colors">Dashboard</a>
-    </div>
-  </div>
-</nav>
+<%- include('partials/nav-public') %>
 
 <!-- Hero -->
 <section class="relative overflow-hidden">
   <div class="absolute inset-0 bg-gradient-to-b from-cyan-500/5 via-purple-500/5 to-transparent pointer-events-none"></div>
   <div class="max-w-6xl mx-auto px-4 pt-20 pb-16 text-center relative">
-    <img src="/images/logo.png" alt="Bouncer" class="w-32 h-32 mx-auto mb-8 rounded-2xl shadow-2xl shadow-cyan-500/20 ring-1 ring-slate-800">
+    <img src="/images/logo.png" alt="Bouncer" class="w-32 h-32 mx-auto mb-8 rounded-2xl shadow-xl shadow-slate-300/60 dark:shadow-2xl dark:shadow-cyan-500/20 ring-1 ring-slate-200 dark:ring-slate-800">
     <h1 class="text-4xl md:text-5xl font-bold mb-4">
-      <span class="text-cyan-400">Bouncer</span>
+      <span class="text-cyan-600 dark:text-cyan-400">Bouncer</span>
     </h1>
-    <p class="text-xl md:text-2xl text-gray-300 mb-3 font-light">
+    <p class="text-xl md:text-2xl text-slate-700 dark:text-gray-300 mb-3 font-light">
       Token-gated access for Telegram communities
     </p>
-    <p class="text-gray-500 max-w-2xl mx-auto mb-10 leading-relaxed">
+    <p class="text-slate-500 dark:text-gray-500 max-w-2xl mx-auto mb-10 leading-relaxed">
       Bouncer is a Telegram bot that controls group access based on Enjin token ownership.
       Members verify their wallet, and Bouncer automatically manages who gets in and who gets removed &mdash;
       no manual moderation needed.
     </p>
     <div class="flex flex-wrap items-center justify-center gap-4">
       <a href="https://t.me/<%= botUsername %>" target="_blank"
-         class="bg-cyan-600 text-white px-6 py-3 rounded-xl text-sm font-medium hover:bg-cyan-500 transition-colors shadow-lg shadow-cyan-500/20">
+         class="bg-cyan-600 text-white px-6 py-3 rounded-xl text-sm font-medium hover:bg-cyan-700 dark:hover:bg-cyan-500 transition-colors shadow-md shadow-cyan-500/10 dark:shadow-lg dark:shadow-cyan-500/20">
         Add to Telegram
       </a>
       <a href="#how-it-works"
-         class="bg-slate-800 text-gray-300 px-6 py-3 rounded-xl text-sm font-medium hover:bg-slate-700 transition-colors border border-slate-700">
+         class="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-gray-300 px-6 py-3 rounded-xl text-sm font-medium hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors border border-slate-200 dark:border-slate-700">
         How it works
       </a>
     </div>
 
     <!-- Live stats — read from DB on each page load -->
     <div class="mt-12 flex flex-wrap justify-center gap-4 max-w-3xl mx-auto">
-      <div class="flex-1 min-w-[140px] bg-slate-900 border border-slate-800 rounded-xl p-6 text-center">
-        <div class="text-4xl font-bold text-cyan-400 mb-1"><%= verifiedUsers %></div>
-        <div class="text-sm text-gray-500">Verified users</div>
+      <div class="flex-1 min-w-[140px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-center shadow-sm">
+        <div class="text-4xl font-bold text-cyan-600 dark:text-cyan-400 mb-1"><%= verifiedUsers %></div>
+        <div class="text-sm text-slate-500 dark:text-gray-500">Verified users</div>
       </div>
-      <div class="flex-1 min-w-[140px] bg-slate-900 border border-slate-800 rounded-xl p-6 text-center">
-        <div class="text-4xl font-bold text-purple-400 mb-1"><%= verifiedGroups %></div>
-        <div class="text-sm text-gray-500">Active groups</div>
+      <div class="flex-1 min-w-[140px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-center shadow-sm">
+        <div class="text-4xl font-bold text-purple-600 dark:text-purple-400 mb-1"><%= verifiedGroups %></div>
+        <div class="text-sm text-slate-500 dark:text-gray-500">Active groups</div>
       </div>
-      <div class="flex-1 min-w-[140px] bg-slate-900 border border-slate-800 rounded-xl p-6 text-center">
-        <div class="text-4xl font-bold text-emerald-400 mb-1"><%= membersProcessed %></div>
-        <div class="text-sm text-gray-500">Members processed</div>
+      <div class="flex-1 min-w-[140px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-center shadow-sm">
+        <div class="text-4xl font-bold text-emerald-600 dark:text-emerald-400 mb-1"><%= membersProcessed %></div>
+        <div class="text-sm text-slate-500 dark:text-gray-500">Members processed</div>
       </div>
     </div>
   </div>
@@ -62,34 +48,34 @@
 
 <!-- How it works -->
 <section id="how-it-works" class="max-w-6xl mx-auto px-4 py-16">
-  <h2 class="text-2xl font-bold text-center mb-12 text-gray-100">How it works</h2>
+  <h2 class="text-2xl font-bold text-center mb-12 text-slate-900 dark:text-gray-100">How it works</h2>
   <div class="grid gap-6 md:grid-cols-3">
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 text-center">
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-center shadow-sm">
       <div class="w-12 h-12 bg-cyan-500/15 rounded-xl flex items-center justify-center mx-auto mb-4">
         <span class="text-2xl">1</span>
       </div>
-      <h3 class="font-semibold text-gray-100 mb-2">Add the bot</h3>
-      <p class="text-sm text-gray-400">
+      <h3 class="font-semibold text-slate-900 dark:text-gray-100 mb-2">Add the bot</h3>
+      <p class="text-sm text-slate-600 dark:text-gray-400">
         Invite Bouncer to your Telegram group and promote it to admin.
         Set your token requirements with simple commands.
       </p>
     </div>
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 text-center">
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-center shadow-sm">
       <div class="w-12 h-12 bg-purple-500/15 rounded-xl flex items-center justify-center mx-auto mb-4">
         <span class="text-2xl">2</span>
       </div>
-      <h3 class="font-semibold text-gray-100 mb-2">Member verification</h3>
-      <p class="text-sm text-gray-400">
+      <h3 class="font-semibold text-slate-900 dark:text-gray-100 mb-2">Member verification</h3>
+      <p class="text-sm text-slate-600 dark:text-gray-400">
         New members scan a QR code with their Enjin Wallet to link their account.
         Bouncer checks their token holdings instantly.
       </p>
     </div>
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 text-center">
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 text-center shadow-sm">
       <div class="w-12 h-12 bg-emerald-500/15 rounded-xl flex items-center justify-center mx-auto mb-4">
         <span class="text-2xl">3</span>
       </div>
-      <h3 class="font-semibold text-gray-100 mb-2">Automatic enforcement</h3>
-      <p class="text-sm text-gray-400">
+      <h3 class="font-semibold text-slate-900 dark:text-gray-100 mb-2">Automatic enforcement</h3>
+      <p class="text-sm text-slate-600 dark:text-gray-400">
         Bouncer continuously re-checks wallets. If someone sells or transfers their token,
         they lose access automatically.
       </p>
@@ -99,42 +85,42 @@
 
 <!-- Features -->
 <section class="max-w-6xl mx-auto px-4 py-16">
-  <h2 class="text-2xl font-bold text-center mb-12 text-gray-100">What you get</h2>
+  <h2 class="text-2xl font-bold text-center mb-12 text-slate-900 dark:text-gray-100">What you get</h2>
   <div class="grid gap-4 md:grid-cols-2">
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 flex items-start gap-4">
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex items-start gap-4 shadow-sm">
       <div class="w-10 h-10 bg-cyan-500/15 rounded-lg flex items-center justify-center shrink-0 mt-0.5">
-        <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+        <svg class="w-5 h-5 text-cyan-600 dark:text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
       </div>
       <div>
-        <h3 class="font-semibold text-gray-100 mb-1">Token-based access</h3>
-        <p class="text-sm text-gray-400">Gate by collection, specific token ID, or minimum token balance. Supports all tokens on the Enjin blockchain.</p>
+        <h3 class="font-semibold text-slate-900 dark:text-gray-100 mb-1">Token-based access</h3>
+        <p class="text-sm text-slate-600 dark:text-gray-400">Gate by collection, specific token ID, or minimum token balance. Supports all tokens on the Enjin blockchain.</p>
       </div>
     </div>
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 flex items-start gap-4">
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex items-start gap-4 shadow-sm">
       <div class="w-10 h-10 bg-purple-500/15 rounded-lg flex items-center justify-center shrink-0 mt-0.5">
-        <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+        <svg class="w-5 h-5 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
       </div>
       <div>
-        <h3 class="font-semibold text-gray-100 mb-1">Continuous re-checks</h3>
-        <p class="text-sm text-gray-400">Configurable intervals. Bouncer periodically re-verifies every member's wallet so access stays current.</p>
+        <h3 class="font-semibold text-slate-900 dark:text-gray-100 mb-1">Continuous re-checks</h3>
+        <p class="text-sm text-slate-600 dark:text-gray-400">Configurable intervals. Bouncer periodically re-verifies every member's wallet so access stays current.</p>
       </div>
     </div>
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 flex items-start gap-4">
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex items-start gap-4 shadow-sm">
       <div class="w-10 h-10 bg-emerald-500/15 rounded-lg flex items-center justify-center shrink-0 mt-0.5">
-        <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
+        <svg class="w-5 h-5 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
       </div>
       <div>
-        <h3 class="font-semibold text-gray-100 mb-1">Web dashboard</h3>
-        <p class="text-sm text-gray-400">View members, manage rules, trigger manual re-checks, and browse audit logs &mdash; all from a clean admin panel.</p>
+        <h3 class="font-semibold text-slate-900 dark:text-gray-100 mb-1">Web dashboard</h3>
+        <p class="text-sm text-slate-600 dark:text-gray-400">View members, manage rules, trigger manual re-checks, and browse audit logs &mdash; all from a clean admin panel.</p>
       </div>
     </div>
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 flex items-start gap-4">
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex items-start gap-4 shadow-sm">
       <div class="w-10 h-10 bg-amber-500/15 rounded-lg flex items-center justify-center shrink-0 mt-0.5">
-        <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
+        <svg class="w-5 h-5 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
       </div>
       <div>
-        <h3 class="font-semibold text-gray-100 mb-1">Multiple collections per group</h3>
-        <p class="text-sm text-gray-400">Stack rules for different collections or tokens. A member who satisfies any of the rules keeps access.</p>
+        <h3 class="font-semibold text-slate-900 dark:text-gray-100 mb-1">Multiple collections per group</h3>
+        <p class="text-sm text-slate-600 dark:text-gray-400">Stack rules for different collections or tokens. A member who satisfies any of the rules keeps access.</p>
       </div>
     </div>
   </div>
@@ -142,51 +128,51 @@
 
 <!-- Bouncer MFT -->
 <section class="max-w-6xl mx-auto px-4 py-16">
-  <div class="bg-gradient-to-br from-slate-900 to-slate-900/50 border border-purple-500/30 rounded-2xl p-8 md:p-12 relative overflow-hidden">
+  <div class="bg-gradient-to-br from-white to-slate-50 dark:from-slate-900 dark:to-slate-900/50 border border-purple-500/30 rounded-2xl p-8 md:p-12 relative overflow-hidden shadow-sm">
     <div class="absolute top-0 right-0 w-64 h-64 bg-purple-500/5 rounded-full blur-3xl pointer-events-none"></div>
     <div class="relative flex flex-col md:flex-row items-center gap-8">
-      <div class="shrink-0">
-        <img src="/images/logo.png" alt="Bouncer MFT" class="w-40 h-40 rounded-2xl shadow-2xl shadow-purple-500/20 ring-1 ring-purple-500/30">
-      </div>
       <div>
         <div class="flex items-center gap-3 mb-3">
-          <h2 class="text-2xl font-bold text-gray-100">Bouncer MFT</h2>
-          <span class="bg-purple-500/15 text-purple-400 text-xs px-3 py-1 rounded-full font-medium">Early Access</span>
+          <h2 class="text-2xl font-bold text-slate-900 dark:text-gray-100">Bouncer MFT</h2>
+          <span class="bg-purple-500/15 text-purple-600 dark:text-purple-400 text-xs px-3 py-1 rounded-full font-medium">Early Access</span>
         </div>
-        <p class="text-gray-400 mb-4 leading-relaxed">
+        <p class="text-slate-600 dark:text-gray-400 mb-4 leading-relaxed">
           Bouncer is currently in early access. To use Bouncer as a group admin, you need to hold a
-          <strong class="text-gray-200">Bouncer MFT</strong> in your Enjin wallet.
+          <strong class="text-slate-800 dark:text-gray-200">Bouncer MFT</strong> in your Enjin wallet.
           The MFT acts as your admin pass &mdash; it unlocks the ability to add Bouncer to your groups
           and configure token based rules.
         </p>
         <ul class="space-y-2 mb-6">
-          <li class="flex items-center gap-2 text-sm text-gray-300">
-            <svg class="w-4 h-4 text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+          <li class="flex items-center gap-2 text-sm text-slate-700 dark:text-gray-300">
+            <svg class="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
             Get early acces to future features
           </li>
-          <li class="flex items-center gap-2 text-sm text-gray-300">
-            <svg class="w-4 h-4 text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+          <li class="flex items-center gap-2 text-sm text-slate-700 dark:text-gray-300">
+            <svg class="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
             Add Bouncer to unlimited groups
           </li>
-          <li class="flex items-center gap-2 text-sm text-gray-300">
-            <svg class="w-4 h-4 text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+          <li class="flex items-center gap-2 text-sm text-slate-700 dark:text-gray-300">
+            <svg class="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
             Full access to the web dashboard
           </li>
-          <li class="flex items-center gap-2 text-sm text-gray-300">
-            <svg class="w-4 h-4 text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+          <li class="flex items-center gap-2 text-sm text-slate-700 dark:text-gray-300">
+            <svg class="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
             Configure rules, manage members, view audit logs
           </li>
-          <li class="flex items-center gap-2 text-sm text-gray-300">
-            <svg class="w-4 h-4 text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+          <li class="flex items-center gap-2 text-sm text-slate-700 dark:text-gray-300">
+            <svg class="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
             Get acces to exclusive features for MFT holders
           </li>
         </ul>
         <div class="flex flex-wrap items-center gap-4">
           <a href="https://nft.io/asset/4440-1" target="_blank"
-             class="bg-purple-600 text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-purple-500 transition-colors shadow-lg shadow-purple-500/20">
+             class="bg-purple-600 text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-purple-700 dark:hover:bg-purple-500 transition-colors shadow-md shadow-purple-500/10 dark:shadow-lg dark:shadow-purple-500/20">
             Get on NFT.io
           </a>
         </div>
+      </div>
+      <div class="shrink-0">
+        <img src="/images/logo.png" alt="Bouncer MFT" class="w-40 h-40 rounded-2xl shadow-xl shadow-purple-500/10 dark:shadow-2xl dark:shadow-purple-500/20 ring-1 ring-purple-500/30">
       </div>
     </div>
   </div>
@@ -194,33 +180,18 @@
 
 <!-- CTA -->
 <section class="max-w-6xl mx-auto px-4 py-16 text-center">
-  <h2 class="text-2xl font-bold text-gray-100 mb-3">Ready to protect your community?</h2>
-  <p class="text-gray-500 mb-8 max-w-lg mx-auto">Add Bouncer to your Telegram group and start gating access with Enjin tokens in minutes.</p>
+  <h2 class="text-2xl font-bold text-slate-900 dark:text-gray-100 mb-3">Ready to protect your community?</h2>
+  <p class="text-slate-500 dark:text-gray-500 mb-8 max-w-lg mx-auto">Add Bouncer to your Telegram group and start gating access with Enjin tokens in minutes.</p>
   <div class="flex flex-wrap items-center justify-center gap-4">
     <a href="https://t.me/<%= botUsername %>" target="_blank"
-       class="bg-cyan-600 text-white px-6 py-3 rounded-xl text-sm font-medium hover:bg-cyan-500 transition-colors shadow-lg shadow-cyan-500/20">
+       class="bg-cyan-600 text-white px-6 py-3 rounded-xl text-sm font-medium hover:bg-cyan-700 dark:hover:bg-cyan-500 transition-colors shadow-md shadow-cyan-500/10 dark:shadow-lg dark:shadow-cyan-500/20">
       Add to Telegram
     </a>
     <a href="/dashboard"
-       class="bg-slate-800 text-gray-300 px-6 py-3 rounded-xl text-sm font-medium hover:bg-slate-700 transition-colors border border-slate-700">
+       class="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-gray-300 px-6 py-3 rounded-xl text-sm font-medium hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors border border-slate-200 dark:border-slate-700">
       Open Dashboard
     </a>
   </div>
 </section>
-
-<!-- Footer -->
-<footer class="border-t border-slate-800 mt-8">
-  <div class="max-w-6xl mx-auto px-4 py-6 flex flex-col md:flex-row items-center justify-between gap-4">
-    <div class="flex items-center gap-2">
-      
-      <span class="text-sm text-gray-500">Bouncer</span>
-    </div>
-    <div class="flex items-center gap-4">
-      <a href="/contact" class="text-sm text-gray-500 hover:text-gray-300 transition-colors">Contact</a>
-      <a href="/legal" class="text-sm text-gray-500 hover:text-gray-300 transition-colors">Legal</a>
-      
-    </div>
-  </div>
-</footer>
 
 <%- include('partials/footer') %>

@@ -107,7 +107,9 @@ router.get("/:id", requireGroupAdmin, async (req: Request, res: Response) => {
   let countWhere = `WHERE m.group_id = $1`;
   if (search) {
     countParams.push(`%${search}%`);
-    countWhere += ` AND (u.username ILIKE $2 OR u.first_name ILIKE $2)`;
+    // ILIKE op wallet_address werkt ook met NULL (geeft NULL terug → falsy),
+    // dus geen coalesce nodig. Users zonder wallet matchen 'm simpelweg niet.
+    countWhere += ` AND (u.username ILIKE $2 OR u.first_name ILIKE $2 OR u.wallet_address ILIKE $2)`;
   }
 
   const totalResult = await query(
@@ -121,14 +123,36 @@ router.get("/:id", requireGroupAdmin, async (req: Request, res: Response) => {
     ? [groupId, `%${search}%`, pageSize, offset]
     : [groupId, pageSize, offset];
   const memberWhere = search
-    ? `WHERE m.group_id = $1 AND (u.username ILIKE $2 OR u.first_name ILIKE $2)`
+    ? `WHERE m.group_id = $1 AND (u.username ILIKE $2 OR u.first_name ILIKE $2 OR u.wallet_address ILIKE $2)`
     : `WHERE m.group_id = $1`;
   const memberLimit = search ? `LIMIT $3 OFFSET $4` : `LIMIT $2 OFFSET $3`;
+
+  // Whitelisted ORDER BY clauses — NEVER interpolate raw user input into SQL.
+  // Elke sortable kolom heeft een asc/desc variant. Status krijgt een custom
+  // case-volgorde (PENDING eerst — die wil een admin meestal zien, dan
+  // VERIFIED, dan KICKED, dan LEFT). Alle niet-tijd-gebaseerde sorts krijgen
+  // `m.created_at DESC` als secundaire tie-breaker voor deterministische
+  // paginatie. Wallets/last_checked gebruiken NULLS LAST zodat lege waarden
+  // niet de eerste pagina domineren.
+  const SORT_OPTIONS: Record<string, string> = {
+    "user-asc": "COALESCE(u.first_name, u.username, '') ASC, m.created_at DESC",
+    "user-desc": "COALESCE(u.first_name, u.username, '') DESC, m.created_at DESC",
+    "wallet-asc": "u.wallet_address ASC NULLS LAST, m.created_at DESC",
+    "wallet-desc": "u.wallet_address DESC NULLS LAST, m.created_at DESC",
+    "status-asc": "CASE m.status WHEN 'PENDING' THEN 1 WHEN 'VERIFIED' THEN 2 WHEN 'KICKED' THEN 3 WHEN 'LEFT' THEN 4 ELSE 5 END ASC, m.created_at DESC",
+    "status-desc": "CASE m.status WHEN 'PENDING' THEN 1 WHEN 'VERIFIED' THEN 2 WHEN 'KICKED' THEN 3 WHEN 'LEFT' THEN 4 ELSE 5 END DESC, m.created_at DESC",
+    "checked-asc": "m.last_checked ASC NULLS LAST, m.created_at DESC",
+    "checked-desc": "m.last_checked DESC NULLS LAST, m.created_at DESC",
+    "joined-asc": "m.created_at ASC",
+    "joined-desc": "m.created_at DESC",
+  };
+  const sortKey = typeof req.query.sort === "string" ? req.query.sort : "joined-desc";
+  const orderBy = SORT_OPTIONS[sortKey] ?? SORT_OPTIONS["joined-desc"];
 
   const members = await query(
     `SELECT m.*, u.telegram_id AS user_telegram_id, u.username, u.first_name, u.wallet_address
      FROM members m JOIN users u ON u.id = m.user_id
-     ${memberWhere} ORDER BY m.created_at DESC ${memberLimit}`,
+     ${memberWhere} ORDER BY ${orderBy} ${memberLimit}`,
     memberParams,
   );
 
@@ -138,9 +162,14 @@ router.get("/:id", requireGroupAdmin, async (req: Request, res: Response) => {
   // Same pattern for the Bouncer Pass gate (requireBouncerPass middleware).
   const accessError = typeof req.query.accessError === "string" ? req.query.accessError : null;
 
+  // Valideer sort naar de template — als het geen bekende key was, val terug
+  // op 'joined-desc' zodat de template-helper niet onzin-arrows toont.
+  const validatedSort = SORT_OPTIONS[sortKey] ? sortKey : "joined-desc";
+
   res.render("group", {
     user, group: groupResult.rows[0], rules: rules.rows, members: members.rows,
     page, totalPages, totalMembers, search, stats, ruleError, accessError,
+    sort: validatedSort,
   });
 });
 

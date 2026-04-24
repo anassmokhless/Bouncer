@@ -1,1 +1,6 @@
 @import "tailwindcss";
+
+/* Enable class-based dark mode. `dark:` variants apply when the `.dark` class
+   is on <html> (or any ancestor). A FOUC-prevention script in head.ejs sets
+   that class before first paint based on localStorage + prefers-color-scheme. */
+@custom-variant dark (&:where(.dark, .dark *));

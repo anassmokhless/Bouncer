@@ -1,17 +1,22 @@
 <%- include('partials/head', { title: 'Login — Bouncer' }) %>
 
 <div class="flex items-center justify-center min-h-screen">
-  <div class="bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-8 w-full max-w-sm text-center">
+  <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl shadow-slate-300/50 dark:shadow-2xl p-8 w-full max-w-sm text-center">
     <img src="/images/logo.png" alt="Bouncer" class="w-28 h-28 mx-auto mb-5 rounded-2xl shadow-lg shadow-cyan-500/10">
-    <h1 class="text-2xl font-bold text-cyan-400 mb-2">Bouncer</h1>
-    <p class="text-sm text-gray-400 mb-6">Sign in with your Telegram account to manage your groups.</p>
+    <h1 class="text-2xl font-bold text-cyan-600 dark:text-cyan-400 mb-2">Bouncer</h1>
+    <p class="text-sm text-slate-600 dark:text-gray-400 mb-6">Sign in with your Telegram account to manage your groups.</p>
 
     <!-- Telegram Login Widget — using data-onauth (JS callback via postMessage)
          instead of data-auth-url (popup → redirect). data-auth-url is less
          reliable: Telegram's popup sometimes closes before the redirect lands,
          causing nginx 499s and no auth data reaching the server. data-onauth
          hands us the auth blob directly in the parent window, which we then
-         pass to the same GET /auth/telegram/callback route. -->
+         pass to the same GET /auth/telegram/callback route.
+
+         Het widget past zich niet aan aan onze theme class — 't volgt z'n
+         eigen auto-detect (prefers-color-scheme). Bij een mismatch tussen
+         user-toggle en OS-preference kan 't licht of donker lijken los van
+         onze pagina. Geen Telegram-API om dit te forceren; geaccepteerd. -->
     <div class="flex justify-center mb-4">
       <script async src="https://telegram.org/js/telegram-widget.js?22"
               data-telegram-login="<%= botUsername %>"
@@ -29,13 +34,13 @@
     </script>
 
     <% if (isDev) { %>
-      <hr class="my-4 border-slate-700">
-      <p class="text-xs text-gray-500 mb-2">Dev Login (development only)</p>
+      <hr class="my-4 border-slate-200 dark:border-slate-700">
+      <p class="text-xs text-slate-500 dark:text-gray-500 mb-2">Dev Login (development only)</p>
       <form action="/auth/dev" method="get" class="flex gap-2">
         <input type="text" name="telegramId" placeholder="Telegram ID"
-               class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-cyan-500">
+               class="flex-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-gray-100 placeholder-slate-400 dark:placeholder-gray-500 focus:outline-none focus:border-cyan-500">
         <button type="submit"
-                class="bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-cyan-500 transition-colors">
+                class="bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-cyan-700 dark:hover:bg-cyan-500 transition-colors">
           Login
         </button>
       </form>
