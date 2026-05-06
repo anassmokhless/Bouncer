@@ -256,21 +256,38 @@ async function pollPendingVerifications(bot: Bot) {
       await client.query(`DELETE FROM pending_verifications WHERE id = $1`, [row.id]);
 
       for (const vg of verifiedGroups) {
-        // Guarded UPDATE: only flip PENDING/VERIFIED → VERIFIED. If the user
-        // left (or was kicked) between the NFT-check loop above and this
-        // transaction, members.status is now LEFT/KICKED and we'd otherwise
-        // overwrite with VERIFIED — inconsistent with reality + spurious
-        // USER_VERIFIED audit entry. Same race-class as the kick-cron fixes.
-        const updateResult = await client.query(
+        // Two-step write: scheid transitie (audit-waardig) van idempotente
+        // refresh (niet audit-waardig).
+        //
+        // Statement 1 — STRICTE guard `status = 'PENDING'`: alleen een echte
+        // PENDING → VERIFIED transitie schrijft een USER_VERIFIED audit. Voorkomt
+        // dat een user die meerdere keren `/verify` runt (bv. omdat ze niet weten
+        // dat ze al verified zijn) elke keer een nieuwe audit entry produceert.
+        // De vorige guard `IN ('PENDING','VERIFIED')` was te lossig — re-runs op
+        // al-VERIFIED users gaven rowCount > 0 en dus duplicate audits.
+        //
+        // Statement 2 — refresh `last_checked` als status al VERIFIED was. Geen
+        // audit. Houdt onze "wanneer voor 't laatst gecheckt" data fresh zonder
+        // de audit log te vervuilen. Als status LEFT/KICKED is (race-condition
+        // waarbij user vertrok tussen NFT-check en transactie), matcht geen van
+        // beide statements — status blijft correct, geen spurious audit.
+        const transitionResult = await client.query(
           `UPDATE members SET status = 'VERIFIED', last_checked = now()
-           WHERE id = $1 AND status IN ('PENDING', 'VERIFIED')`,
+           WHERE id = $1 AND status = 'PENDING'`,
           [vg.memberId],
         );
-        if ((updateResult.rowCount ?? 0) > 0) {
+        if ((transitionResult.rowCount ?? 0) > 0) {
           await client.query(
             `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
             [vg.groupId, row.user_id, "USER_VERIFIED",
              JSON.stringify({ walletAddress, collectionId: vg.collectionId, tokenId: vg.tokenId })],
+          );
+        } else {
+          // Was al VERIFIED — alleen last_checked bijwerken, geen audit.
+          await client.query(
+            `UPDATE members SET last_checked = now()
+             WHERE id = $1 AND status = 'VERIFIED'`,
+            [vg.memberId],
           );
         }
       }
