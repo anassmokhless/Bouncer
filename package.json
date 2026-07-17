@@ -1,6 +1,7 @@
 {
   "name": "tgbot",
   "private": true,
+  "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
     "dev:bot": "nodemon --exec tsx src/bot/index.ts",
