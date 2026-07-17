@@ -4,3 +4,4 @@ dist/
 public/css/output.css
 *.tsbuildinfo
 **/GUIDE.md
+.claude/

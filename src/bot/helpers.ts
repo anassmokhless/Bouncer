@@ -48,6 +48,21 @@ function isBasicGroupError(err: unknown): boolean {
 }
 
 /**
+ * Detect Telegram's 400 USER_NOT_PARTICIPANT — the user already left the
+ * chat, so a kick can never succeed. Callers should reconcile the DB
+ * (status → LEFT) instead of retrying forever (see GUIDE 8.11: on metered
+ * infra a permanently-failing retry loop burns real compute).
+ */
+export function isUserNotParticipantError(err: unknown): boolean {
+  return (
+    err instanceof GrammyError &&
+    err.error_code === 400 &&
+    typeof err.description === "string" &&
+    err.description.includes("USER_NOT_PARTICIPANT")
+  );
+}
+
+/**
  * Apply mute permissions to a user. Returns true if Telegram accepted the
  * call, false if the chat is a basic group (silent-skip) or another handled
  * condition. Real errors (permission denied, network, etc.) are logged but

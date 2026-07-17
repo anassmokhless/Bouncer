@@ -3,6 +3,7 @@ import { Api } from "grammy";
 import { query } from "../../shared/db.js";
 import { checkNftOwnership, collectionExists, tokenExists } from "../../shared/enjin.js";
 import { requireLogin, requireGroupAdmin, requireBouncerPass } from "../middleware.js";
+import { isUserNotParticipantError } from "../../bot/helpers.js";
 
 const api = new Api(process.env.BOT_TOKEN!);
 
@@ -267,6 +268,13 @@ router.post("/:id/recheck", requireGroupAdmin, requireBouncerPass, async (req: R
               });
               kickSuccess = true;
             } catch (err) {
+              if (isUserNotParticipantError(err)) {
+                // User already left — stop retrying, reconcile DB with reality.
+                // Guarded VERIFIED → LEFT; no USER_KICKED_MANUAL audit (we didn't kick).
+                await query(`UPDATE members SET status = 'LEFT' WHERE id = $1 AND status = 'VERIFIED'`, [member.id]);
+                console.log(`[DASHBOARD] ${member.user_telegram_id} already left — marked LEFT, skipping kick`);
+                return;
+              }
               console.error(`[DASHBOARD] Failed to kick ${member.user_telegram_id}:`, err);
             }
 

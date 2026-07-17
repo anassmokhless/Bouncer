@@ -2,7 +2,7 @@ import cron from "node-cron";
 import { Bot } from "grammy";
 import { query, pool } from "../shared/db.js";
 import { getVerifiedWallet, checkNftOwnership, hasBouncerPass } from "../shared/enjin.js";
-import { safeUnmute } from "./helpers.js";
+import { safeUnmute, isUserNotParticipantError } from "./helpers.js";
 import { removeCheckedPair, pruneCheckedPairs } from "./handlers/existing-member.js";
 
 let isPolling = false;
@@ -460,6 +460,14 @@ async function recheckVerifiedMembers(bot: Bot) {
           });
           kickSuccess = true;
         } catch (err) {
+          if (isUserNotParticipantError(err)) {
+            // User already left — stop retrying, reconcile DB with reality.
+            // Guarded VERIFIED → LEFT; no USER_KICKED audit (we didn't kick).
+            await query(`UPDATE members SET status = 'LEFT' WHERE id = $1 AND status = 'VERIFIED'`, [member.memberId]);
+            removeCheckedPair(member.groupTelegramId, member.userTelegramId);
+            console.log(`[CRON] ${member.userTelegramId} already left ${member.groupTelegramId} — marked LEFT, skipping kick`);
+            return;
+          }
           console.error(`[CRON] Failed to kick ${member.userTelegramId}:`, err);
         }
 
@@ -534,6 +542,14 @@ async function kickExpiredPendingMembers(bot: Bot) {
       }
       kickSuccess = true;
     } catch (err) {
+      if (isUserNotParticipantError(err)) {
+        // User already left — stop retrying, reconcile DB with reality.
+        // Guarded PENDING → LEFT; no USER_KICKED/USER_BANNED audit (we didn't kick).
+        await query(`UPDATE members SET status = 'LEFT' WHERE id = $1 AND status = 'PENDING'`, [row.id]);
+        removeCheckedPair(row.group_telegram_id, row.user_telegram_id);
+        console.log(`[CRON] ${row.user_telegram_id} already left ${row.group_telegram_id} — marked LEFT, skipping kick`);
+        continue;
+      }
       console.error(`[CRON] Failed to ${isBan ? "ban" : "kick"} expired member:`, err);
     }
 
