@@ -25,6 +25,10 @@ services:
       - "3000:3000"
     env_file:
       - .env
+    # environment: wins over env_file — production behavior (secure cookies,
+    # no dev login) is guaranteed here even when the .env forgets NODE_ENV.
+    environment:
+      NODE_ENV: production
     depends_on:
       postgres:
         condition: service_healthy
@@ -36,6 +40,8 @@ services:
     command: ["node", "dist/bot/index.js"]
     env_file:
       - .env
+    environment:
+      NODE_ENV: production
     depends_on:
       postgres:
         condition: service_healthy

@@ -133,7 +133,9 @@ app.get("/login", (req, res) => {
   }
   res.render("login", {
     botUsername: process.env.BOT_USERNAME,
-    isDev: process.env.NODE_ENV !== "production",
+    // Mirrors the /auth/dev guard exactly — the dev-login form should only be
+    // offered when the route behind it is actually enabled.
+    isDev: process.env.ENABLE_DEV_LOGIN === "true" && process.env.NODE_ENV !== "production",
   });
 });
 

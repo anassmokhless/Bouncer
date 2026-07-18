@@ -36,9 +36,14 @@ router.get("/telegram/callback", authLimiter, async (req: Request, res: Response
   res.redirect("/dashboard");
 });
 
-// Dev-only bypass
+// Dev-only bypass — requires BOTH an explicit ENABLE_DEV_LOGIN=true opt-in and
+// a non-production NODE_ENV. Default is off: an operator who configures nothing
+// never exposes a passwordless impersonation endpoint, and even a stray
+// ENABLE_DEV_LOGIN in a production .env stays inert.
 router.get("/dev", async (req: Request, res: Response) => {
-  if (process.env.NODE_ENV === "production") {
+  const devLoginEnabled =
+    process.env.ENABLE_DEV_LOGIN === "true" && process.env.NODE_ENV !== "production";
+  if (!devLoginEnabled) {
     res.status(404).send("Not found");
     return;
   }

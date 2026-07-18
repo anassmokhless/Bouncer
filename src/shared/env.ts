@@ -23,4 +23,16 @@ export function validateEnv() {
     console.error(`[ENV] FATAL: missing required environment variables: ${missing.join(", ")}`);
     process.exit(1);
   }
+
+  // NODE_ENV is not required (local dev works without it), but a wrong or
+  // missing value on a deployed instance silently disables production behavior
+  // — most importantly the Secure flag on session/CSRF cookies. Warn loudly so
+  // misconfiguration shows up in the boot logs instead of staying invisible.
+  const nodeEnv = process.env.NODE_ENV;
+  if (nodeEnv !== "production" && nodeEnv !== "development" && nodeEnv !== "test") {
+    console.warn(
+      `[ENV] WARNING: NODE_ENV is ${nodeEnv ? `"${nodeEnv}"` : "not set"} — ` +
+        `expected "production" on deployed instances. Running with development behavior (insecure cookies).`,
+    );
+  }
 }
