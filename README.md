@@ -56,7 +56,8 @@ Bouncer checks ownership against your rules, and anyone who doesn't qualify
 ### What you need
 
 - Node.js 20+ (development) or Docker (production)
-- A PostgreSQL database
+- A PostgreSQL database — the production compose file ships one, so you only
+  need to bring your own for development or if you prefer a managed provider
 - A Telegram bot token from [@BotFather](https://t.me/BotFather)
 - Access to the [Enjin Platform](https://platform.enjin.io) GraphQL API
 
@@ -87,6 +88,7 @@ Fill in the values. The important ones:
 | `ENJIN_API_URL`                         | Enjin Platform GraphQL endpoint                                                                     |
 | `ENJIN_API_TOKEN`                       | Optional token for authenticated Enjin requests                                                     |
 | `SESSION_SECRET`                        | Signs dashboard sessions — generate a long random hex string                                        |
+| `POSTGRES_PASSWORD`                     | Password for the bundled Postgres container (skip when using an external database)                  |
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` | Outgoing mail for the contact form                                                                  |
 | `BOUNCER_COLLECTION_ID`                 | Optional: restrict _adding the bot_ to holders of this collection. Leave blank to let anyone use it |
 
@@ -103,17 +105,21 @@ npm run db:migrate
 npm run dev
 ```
 
-Production, with Docker:
+Production, with Docker (set `POSTGRES_PASSWORD` in `.env` first and point
+`DATABASE_URL` at the bundled database: `postgres://bouncer:<POSTGRES_PASSWORD>@postgres:5432/bouncer`):
 
 ```bash
 docker compose -f docker-compose.prod.yml up -d --build
 docker exec tgbot-dashboard node dist/shared/migrate.js
 ```
 
-This starts two containers from the same image: `tgbot-bot` (long-polling
-Telegram bot) and `tgbot-dashboard` (Express server on port 3000). Put a
-reverse proxy with TLS in front of the dashboard — the Telegram login widget
-won't work without HTTPS on the domain you registered with `/setdomain`.
+This starts three containers: `tgbot-postgres` (internal only, data in a named
+volume), plus `tgbot-bot` (long-polling Telegram bot) and `tgbot-dashboard`
+(Express server on port 3000) built from the same image. Put a reverse proxy
+with TLS in front of the dashboard — the Telegram login widget won't work
+without HTTPS on the domain you registered with `/setdomain`. And schedule
+`pg_dump` backups from day one; the bundled database is only as safe as the
+disk it lives on.
 
 ## Architecture
 
@@ -155,7 +161,9 @@ npm run css:build      # one-off tailwind build
 
 There's a devcontainer config in `.devcontainer/` if you'd rather not
 install anything locally. `testscripts/seed-demo.ts` fills a database with
-demo data for dashboard development.
+demo data for dashboard development. Setting `ENABLE_DEV_LOGIN="true"` in
+your local `.env` adds a passwordless dev login to the dashboard's login
+page (never active when `NODE_ENV` is `production`).
 
 ## License
 
