@@ -1,10 +1,11 @@
 import { Router, Request, Response } from "express";
 import { verifyTelegramLogin, upsertTelegramUser } from "../telegram-auth.js";
 import { query } from "../../shared/db.js";
+import { authLimiter } from "../rate-limits.js";
 
 const router = Router();
 
-router.get("/telegram/callback", async (req: Request, res: Response) => {
+router.get("/telegram/callback", authLimiter, async (req: Request, res: Response) => {
   const { id, first_name, last_name, username, photo_url, auth_date, hash } = req.query as Record<string, string>;
 
   if (!id || !hash) {

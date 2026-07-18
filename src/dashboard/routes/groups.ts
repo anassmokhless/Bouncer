@@ -4,6 +4,7 @@ import { query } from "../../shared/db.js";
 import { checkNftOwnership, collectionExists, tokenExists } from "../../shared/enjin.js";
 import { requireLogin, requireGroupAdmin, requireBouncerPass } from "../middleware.js";
 import { isUserNotParticipantError } from "../../bot/helpers.js";
+import { mutationLimiter } from "../rate-limits.js";
 
 const api = new Api(process.env.BOT_TOKEN!);
 
@@ -185,7 +186,7 @@ router.get("/:id", requireGroupAdmin, async (req: Request, res: Response) => {
 // Concurrency: one running job per group (second admin clicking recheck while one is
 // in progress gets 409). Completed jobs are retained for JOB_RETENTION_MS so clients
 // that poll late still see the final result, then auto-pruned.
-router.post("/:id/recheck", requireGroupAdmin, requireBouncerPass, async (req: Request, res: Response) => {
+router.post("/:id/recheck", mutationLimiter, requireGroupAdmin, requireBouncerPass, async (req: Request, res: Response) => {
   const user = req.session.user!;
   const groupId = req.params.id as string;
 
@@ -329,7 +330,7 @@ router.get("/:id/recheck/status", requireGroupAdmin, async (req: Request, res: R
 });
 
 // Add rule
-router.post("/:id/rules", requireGroupAdmin, requireBouncerPass, async (req: Request, res: Response) => {
+router.post("/:id/rules", mutationLimiter, requireGroupAdmin, requireBouncerPass, async (req: Request, res: Response) => {
   const user = req.session.user!;
   const groupId = req.params.id as string;
 
@@ -398,7 +399,7 @@ router.post("/:id/rules", requireGroupAdmin, requireBouncerPass, async (req: Req
 });
 
 // Delete rule
-router.post("/:id/rules/:ruleId/delete", requireGroupAdmin, requireBouncerPass, async (req: Request, res: Response) => {
+router.post("/:id/rules/:ruleId/delete", mutationLimiter, requireGroupAdmin, requireBouncerPass, async (req: Request, res: Response) => {
   const user = req.session.user!;
   const { id: groupId, ruleId } = req.params;
 

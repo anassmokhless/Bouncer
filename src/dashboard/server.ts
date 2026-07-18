@@ -19,6 +19,7 @@ import authRoutes from "./routes/auth.js";
 import groupsRoutes from "./routes/groups.js";
 import auditRoutes from "./routes/audit.js";
 import contactRoutes from "./routes/contact.js";
+import { publicLimiter } from "./rate-limits.js";
 
 const app = express();
 const PgStore = connectPgSimple(session);
@@ -75,6 +76,11 @@ app.use(
     },
   }),
 );
+
+// Anonymous-traffic rate limit. Mounted after the session middleware because
+// its skip() reads req.session.user; static assets are served earlier in the
+// chain and stay outside the budget.
+app.use(publicLimiter);
 
 // CSRF protection via the double-submit cookie pattern. The token is stored in
 // a dedicated cookie (NOT the session) and mirrored in form bodies / X-CSRF-Token
