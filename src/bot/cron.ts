@@ -593,6 +593,11 @@ async function kickExpiredPendingMembers(bot: Bot) {
 }
 
 async function leaveUnverifiedGroups(bot: Bot) {
+  // No-op in open-access mode — no pass exists to enforce, so nothing here
+  // should ever make the bot leave. Mirrors recheckAdminPassOwnership, and
+  // guards the switch-from-early-to-open case where deadlines were left armed.
+  if (!process.env.BOUNCER_COLLECTION_ID) return;
+
   // Triggers for admin_verify_deadline being set:
   //   1. bot-added.ts — adder hasn't linked a wallet yet (initial 5-min window)
   //   2. unlink.ts — an admin ran /unlink; groups they admin get 5 min to re-verify
@@ -655,14 +660,26 @@ async function leaveUnverifiedGroups(bot: Bot) {
     // No admins with wallets OR at least one clean `false` with zero `true`:
     // no admin holds the pass. Leave the group and delete the DB row.
     // Cascade removes group_admins, nft_rules, members, audit_logs.
+    // Best-effort farewell — a failed send (bot muted, rate limited) must not
+    // block the leave below.
     try {
       await bot.api.sendMessage(
         parseInt(row.telegram_id),
         "No admin has a valid Bouncer Pass. Leaving group.",
       );
+    } catch (err) {
+      console.error(`[CRON] Failed to send leave notice to ${row.telegram_id}:`, err);
+    }
+
+    // Only delete the DB row after we've actually left. If leaveChat fails we
+    // keep the row (deadline still armed) so the next tick retries, instead of
+    // deleting state while still a member — which would let getOrCreateGroup
+    // recreate the group rule-less on the next join and auto-verify everyone.
+    try {
       await bot.api.leaveChat(parseInt(row.telegram_id));
     } catch (err) {
-      console.error(`[CRON] Failed to leave group ${row.telegram_id}:`, err);
+      console.error(`[CRON] Failed to leave group ${row.telegram_id}, keeping row for retry:`, err);
+      continue;
     }
 
     await query(`DELETE FROM groups WHERE id = $1`, [row.id]);

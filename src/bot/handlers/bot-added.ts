@@ -89,7 +89,11 @@ export async function handleBotAdded(ctx: Context) {
         [user.id, group.id],
     );
 
-    if (!user.wallet_address) {
+    // Only arm the leave-deadline in early-access mode. With no BOUNCER_COLLECTION_ID
+    // the pass gates nothing, so a wallet-less adder is fine — arming here would make
+    // leaveUnverifiedGroups kick the bot out (and cascade-delete the group) 5 minutes
+    // after a perfectly normal open-access add.
+    if (!user.wallet_address && process.env.BOUNCER_COLLECTION_ID) {
         // Store deadline so the cron can enforce it even after a restart
         await query(
             `UPDATE groups SET admin_verify_deadline = now() + interval '5 minutes' WHERE id = $1`,

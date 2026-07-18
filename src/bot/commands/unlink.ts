@@ -42,6 +42,11 @@ export async function unlinkCommand(ctx: Context) {
   );
   const adminGroupCount: number = adminGroupsResult.rows[0].count;
 
+  // Whether the Bouncer Pass gate is active. When it's off (open access), a
+  // wallet gates nothing, so unlinking one must not arm the admin-verify
+  // deadline or warn about the bot leaving — there is nothing to enforce.
+  const earlyAccess = Boolean(process.env.BOUNCER_COLLECTION_ID);
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -59,7 +64,7 @@ export async function unlinkCommand(ctx: Context) {
     // leaveUnverifiedGroups checks ALL admins of each group when the deadline fires,
     // so if a co-admin still holds the pass the deadline is cleared and the group
     // stays. Otherwise the group is left.
-    if (adminGroupCount > 0) {
+    if (adminGroupCount > 0 && earlyAccess) {
       await client.query(
         `UPDATE groups SET admin_verify_deadline = now() + interval '5 minutes'
          WHERE id IN (SELECT group_id FROM group_admins WHERE user_id = $1)`,
@@ -88,7 +93,7 @@ export async function unlinkCommand(ctx: Context) {
   // Build the reply — admins of any group get an extra warning about the 5-minute
   // bot-leave deadline on top of the standard member unlink message.
   const lines = ["Wallet unlinked."];
-  if (adminGroupCount > 0) {
+  if (adminGroupCount > 0 && earlyAccess) {
     lines.push(
       "",
       `⚠️ You administer ${adminGroupCount} group${adminGroupCount === 1 ? "" : "s"} with Bouncer. Re-verify with your Bouncer Pass within 5 minutes or I'll leave ${adminGroupCount === 1 ? "that group" : "those groups"}.`,
