@@ -1,4 +1,22 @@
 services:
+  postgres:
+    image: postgres:17
+    container_name: tgbot-postgres
+    restart: unless-stopped
+    # No ports: — the database is only reachable inside the compose network.
+    # Publishing 5432 on a public VPS would bypass ufw via Docker's iptables rules.
+    environment:
+      POSTGRES_USER: bouncer
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: bouncer
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bouncer -d bouncer"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   dashboard:
     build: .
     container_name: tgbot-dashboard
@@ -7,6 +25,9 @@ services:
       - "3000:3000"
     env_file:
       - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   bot:
     build: .
@@ -15,3 +36,9 @@ services:
     command: ["node", "dist/bot/index.js"]
     env_file:
       - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

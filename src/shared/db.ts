@@ -2,10 +2,18 @@ import { Pool, QueryResultRow, QueryResult } from "pg";
 import dotenv from "dotenv";
 dotenv.config();
 
+// TLS is driven by the connection string: managed providers (Neon, RDS, ...)
+// put sslmode=require/verify-ca/verify-full in their URLs, a local or
+// in-compose Postgres has no sslmode param and speaks plain TCP. Hardcoding
+// ssl: true here would make the pool refuse non-TLS servers entirely.
+const useSsl = /\bsslmode=(require|verify-ca|verify-full|prefer)\b/.test(
+  process.env.DATABASE_URL ?? "",
+);
+
 //connection to db
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: true,
+  ssl: useSsl,
   // Default is 10. Bumped to 20 to give headroom for advisory-lock connections
   // (one per active cron) on top of transaction connections held by cron workers.
   // Worst case: all 4 crons firing simultaneously + recheck mid-batch ≈ 10-11
