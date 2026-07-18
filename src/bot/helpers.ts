@@ -1,4 +1,4 @@
-import { Api, GrammyError } from "grammy";
+import { Api, API_CONSTANTS, GrammyError } from "grammy";
 import { query } from "../shared/db.js";
 import { hasBouncerPass } from "../shared/enjin.js";
 
@@ -18,15 +18,6 @@ const MUTE_PERMISSIONS = {
   can_invite_users: false,
   can_pin_messages: false,
   can_manage_topics: false,
-};
-
-// "Unmuted" — restore the default posting permissions.
-const UNMUTE_PERMISSIONS = {
-  can_send_messages: true,
-  can_send_audios: true,
-  can_send_photos: true,
-  can_send_voice_notes: true,
-  can_send_other_messages: true,
 };
 
 // Chats we've confirmed are basic groups (not supergroups). Telegram's
@@ -107,7 +98,15 @@ export async function safeUnmute(
   if (basicGroups.has(chatKey)) return false;
 
   try {
-    await api.restrictChatMember(Number(chatId), Number(userId), UNMUTE_PERMISSIONS);
+    // All-true is the Bot API's documented "lift restrictions" payload: the
+    // member returns to plain-member status and follows the group's live
+    // default permissions from then on (Telegram caps effective rights at
+    // those defaults, so this can never grant more than an ordinary member).
+    // Do NOT replay chat.permissions here instead — any false field in that
+    // snapshot keeps the user "restricted" forever, pinned to the defaults as
+    // they happened to be at unmute time (e.g. a temporary group lockdown
+    // would leave a member who verified during it muted permanently).
+    await api.restrictChatMember(Number(chatId), Number(userId), API_CONSTANTS.ALL_CHAT_PERMISSIONS);
     return true;
   } catch (err) {
     if (isBasicGroupError(err)) {

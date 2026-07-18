@@ -87,7 +87,11 @@ export function registerSetupCommands(bot: Bot) {
     if (!(await isAuthorizedAdmin(ctx))) return;
 
     const text = ctx.message?.text || "";
-    const parts = text.split(" ").slice(1);
+    // Split on whitespace RUNS, not single spaces: "/addrule 1234  5678" (double
+    // space, common on mobile) would otherwise yield ["1234", "", "5678"] —
+    // shifting the token id into the min_balance slot and silently saving a
+    // rule nobody can pass.
+    const parts = text.trim().split(/\s+/).slice(1);
 
     if (parts.length < 1) {
       await ctx.reply(
@@ -105,7 +109,23 @@ export function registerSetupCommands(bot: Bot) {
 
     const collectionId = parts[0];
     const tokenId = parts[1] || null;
-    const minBalance = parseInt(parts[2]) || 1;
+
+    // min_balance gets the same strict treatment as the IDs below, because
+    // parseInt alone is dangerous in both directions: "-1" opens the gate to
+    // every wallet, and prefix-parsing quietly WEAKENS it ("1e5" → 1 when the
+    // admin meant 100000). Rejecting beats silently rewriting a gate
+    // threshold. Upper bound = int4 max, matching the column type.
+    // (checkNftOwnership also floors its input, so even a bad stored row can
+    // never open the gate — this check is about honest admin feedback.)
+    let minBalance = 1;
+    if (parts[2] !== undefined) {
+      const parsed = /^\d+$/.test(parts[2]) ? parseInt(parts[2]) : NaN;
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 2147483647) {
+        await ctx.reply("Min balance must be a whole number of at least 1. Example: /addrule 1234 5678 3");
+        return;
+      }
+      minBalance = parsed;
+    }
 
     // Enjin collection/token IDs are numeric. Reject non-numeric input early so admins get
     // clear feedback instead of silently-broken rules that never verify anyone.

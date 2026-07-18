@@ -395,15 +395,32 @@ router.post("/:id/rules", mutationLimiter, requireGroupAdmin, requireBouncerPass
   const intervalHours = Math.min(Math.max(parseInt(checkInterval) || 1, 1), 720);
   const intervalSeconds = intervalHours * 3600;
 
+  // min_balance: strict positive integer, capped at int4 max. The form's
+  // min="1" is client-side only; parseInt alone lets "-1" open the gate to
+  // every wallet, quietly weakens "1e5" to 1, and an unbounded value overflows
+  // the int column into the generic 500 page instead of this route's error
+  // banner. Rejecting beats silently rewriting a gate threshold.
+  // (checkNftOwnership also floors its input as the enforcement backstop.)
+  let minBalanceValue = 1;
+  const minBalanceRaw = String(minBalance ?? "").trim();
+  if (minBalanceRaw !== "") {
+    const parsed = /^\d+$/.test(minBalanceRaw) ? parseInt(minBalanceRaw) : NaN;
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 2147483647) {
+      redirectWithError("Min balance must be a whole number of at least 1.");
+      return;
+    }
+    minBalanceValue = parsed;
+  }
+
   await query(
     `INSERT INTO nft_rules (group_id, collection_id, token_id, min_balance, check_interval_seconds) VALUES ($1, $2, $3, $4, $5)`,
-    [groupId, collectionId, tokenId || null, parseInt(minBalance) || 1, intervalSeconds],
+    [groupId, collectionId, tokenId || null, minBalanceValue, intervalSeconds],
   );
 
   // Audit log
   await query(
     `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-    [groupId, user.id, "RULE_ADDED", JSON.stringify({ collectionId, tokenId: tokenId || null, minBalance: parseInt(minBalance) || 1, checkIntervalHours: intervalHours })],
+    [groupId, user.id, "RULE_ADDED", JSON.stringify({ collectionId, tokenId: tokenId || null, minBalance: minBalanceValue, checkIntervalHours: intervalHours })],
   );
 
   res.redirect(`/dashboard/${groupId}`);

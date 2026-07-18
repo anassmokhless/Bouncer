@@ -184,6 +184,13 @@ export async function checkNftOwnership(
   tokenId: string | null,
   minBalance: number = 1,
 ): Promise<boolean | null> {
+  // Enforcement floor for the gate threshold. A min_balance < 1 makes every
+  // `balance >= minBalance` comparison below true for every wallet — the gate
+  // silently opens to anyone. The write paths validate their input, but this
+  // is the single point every rule consumer passes through, so it also
+  // neutralizes bad rows already in the database and any future writer.
+  minBalance = Math.max(1, minBalance);
+
   try {
     if (tokenId) {
       // Specific token: filter by collectionId at query time, then match tokenId
