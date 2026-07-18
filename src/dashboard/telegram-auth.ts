@@ -40,8 +40,13 @@ export function verifyTelegramLogin(data: TelegramLoginData): boolean {
 
   if (!crypto.timingSafeEqual(Buffer.from(hmac, "hex"), Buffer.from(hash, "hex"))) return false;
 
+  // Freshness window: reject blobs older than 5 minutes. Telegram fires the
+  // login callback within seconds of the user authorizing, so 5 min is a
+  // comfortable margin for clock skew while shrinking the replay window from a
+  // full day. The blob still travels in the callback query string today, so a
+  // short window is the main defense until that moves to a POST body.
   const authDate = parseInt(data.auth_date);
-  if (Date.now() / 1000 - authDate > 86400) return false;
+  if (!Number.isFinite(authDate) || Date.now() / 1000 - authDate > 300) return false;
 
   return true;
 }

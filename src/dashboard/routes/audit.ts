@@ -1,11 +1,12 @@
 import { Router, Request, Response } from "express";
 import { query } from "../../shared/db.js";
 import { requireLogin } from "../middleware.js";
+import { readLimiter } from "../rate-limits.js";
 
 const router = Router();
 router.use(requireLogin);
 
-router.get("/", async (req: Request, res: Response) => {
+router.get("/", readLimiter, async (req: Request, res: Response) => {
   const user = req.session.user!;
 
   const page = Math.max(1, parseInt(req.query.page as string) || 1);
