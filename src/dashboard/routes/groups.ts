@@ -210,6 +210,17 @@ router.post("/:id/recheck", mutationLimiter, requireGroupAdmin, requireBouncerPa
     [groupId],
   );
 
+  // Guard the zero-rules case: with no active rules the recheck loop below never
+  // sets stillHolds=true, so every verified member falls into the kick branch and
+  // gets banned. The cron recheck sidesteps this via an INNER JOIN on nft_rules;
+  // here we reject the request outright. The UI also disables the button when there
+  // are no rules, so this is the backstop for direct POSTs (double-click, stale
+  // tab, curl).
+  if (rules.rows.length === 0) {
+    res.status(400).json({ error: "This group has no active rules — nothing to re-check." });
+    return;
+  }
+
   const members = await query(
     `SELECT m.id, u.wallet_address, u.id AS user_id, u.telegram_id AS user_telegram_id
      FROM members m JOIN users u ON u.id = m.user_id
