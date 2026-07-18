@@ -5,8 +5,13 @@ import { authLimiter } from "../rate-limits.js";
 
 const router = Router();
 
-router.get("/telegram/callback", authLimiter, async (req: Request, res: Response) => {
-  const { id, first_name, last_name, username, photo_url, auth_date, hash } = req.query as Record<string, string>;
+// POST (not GET) so the signed auth blob rides in the request body, never a URL
+// — a GET callback leaked id/hash/auth_date into nginx logs, history, and
+// Referer, where it was replayable within the freshness window. The login page
+// fetch()es this and navigates on the 204; the global CSRF middleware guards
+// the POST (the page echoes the token in X-CSRF-Token).
+router.post("/telegram/callback", authLimiter, async (req: Request, res: Response) => {
+  const { id, first_name, last_name, username, photo_url, auth_date, hash } = (req.body ?? {}) as Record<string, string>;
 
   if (!id || !hash) {
     res.status(400).send("Missing Telegram auth data");
@@ -41,7 +46,10 @@ router.get("/telegram/callback", authLimiter, async (req: Request, res: Response
     username: user.username,
   };
 
-  res.redirect("/dashboard");
+  // 204, not a redirect: the caller is a fetch(), which would follow a 302 as a
+  // fetch (pulling /dashboard's HTML into the response) rather than navigating.
+  // The client navigates to /dashboard on this 204.
+  res.status(204).end();
 });
 
 // Dev-only bypass — requires BOTH an explicit ENABLE_DEV_LOGIN=true opt-in and

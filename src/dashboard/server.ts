@@ -124,8 +124,8 @@ app.use((req, res, next) => {
 
 // Login page. Telegram widget uses data-onauth (JS callback) instead of
 // data-auth-url — the widget calls a JS function with the auth blob, which
-// we then redirect to /auth/telegram/callback with the params in the query
-// string. Avoids the popup-redirect quirk that was causing 499s in nginx.
+// POSTs it to /auth/telegram/callback (body, not query string, so the signed
+// blob never lands in a URL). Avoids the popup-redirect 499s in nginx too.
 app.get("/login", (req, res) => {
   if (req.session.user) {
     res.redirect("/dashboard");
