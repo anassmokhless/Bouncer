@@ -12,14 +12,23 @@ async function isAuthorizedAdmin(ctx: Context): Promise<boolean> {
     return false;
   }
 
-  try {
-    const member = await ctx.api.getChatMember(ctx.chat.id, ctx.from.id);
-    if (member.status !== "administrator" && member.status !== "creator") {
+  // Anonymous admins post as the group itself (sender_chat === chat) and only
+  // admins can do that — accept it as admin proof. Their ctx.from is the
+  // GroupAnonymousBot service account, so the getChatMember path below can't
+  // work for them. Note: syncAdmin/audit entries will then attribute actions
+  // to "GroupAnonymousBot", which is exactly the anonymity the admin chose.
+  const isAnonymousAdmin = ctx.senderChat?.id === ctx.chat.id;
+
+  if (!isAnonymousAdmin) {
+    try {
+      const member = await ctx.api.getChatMember(ctx.chat.id, ctx.from.id);
+      if (member.status !== "administrator" && member.status !== "creator") {
+        return false;
+      }
+    } catch (e) {
+      console.error(e);
       return false;
     }
-  } catch (e) {
-    console.error(e);
-    return false;
   }
 
   const access = await checkBouncerAccess(ctx.from.id.toString());
@@ -32,6 +41,16 @@ async function isAuthorizedAdmin(ctx: Context): Promise<boolean> {
     return false;
   }
   if (!access) {
+    // The service account can never link a wallet, so in early-access mode an
+    // anonymous admin needs an honest explanation instead of a dead-end
+    // "/verify" suggestion. In open-access mode checkBouncerAccess is always
+    // true and anonymous admins work without restriction.
+    if (isAnonymousAdmin) {
+      await ctx.reply(
+        "Bouncer can't verify a Bouncer Pass for anonymous admins. Turn off 'Remain Anonymous' and try again, or have a non-anonymous admin run this command.",
+      );
+      return false;
+    }
     await ctx.reply(
       "You need a Bouncer Pass NFT to use admin commands. DM me and run /verify to link your wallet.",
     );

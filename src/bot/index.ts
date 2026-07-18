@@ -27,6 +27,15 @@ const bot = new Bot(process.env.BOT_TOKEN!);
 // unverified users could bypass message deletion by prefixing every message with "/".
 bot.use(async (ctx, next) => {
   if (ctx.message?.text?.startsWith("/") && ctx.chat && ctx.chat.type !== "private") {
+    // Anonymous admins ("Remain Anonymous") post as the group itself:
+    // sender_chat === chat, and only admins can do that — that IS the admin
+    // proof. Their ctx.from is the GroupAnonymousBot service account, so the
+    // getChatMember lookup below would fail/return non-admin and silently
+    // swallow every command from an anonymous owner.
+    if (ctx.senderChat?.id === ctx.chat.id) {
+      await next();
+      return;
+    }
     try {
       const member = await ctx.api.getChatMember(ctx.chat.id, ctx.from!.id);
       if (member.status !== "administrator" && member.status !== "creator") {

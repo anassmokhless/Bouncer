@@ -2,6 +2,12 @@ import { Api, API_CONSTANTS, GrammyError } from "grammy";
 import { query } from "../shared/db.js";
 import { hasBouncerPass } from "../shared/enjin.js";
 
+// Telegram's service account that fronts for anonymous admins. Updates whose
+// actor is this id were performed by SOME anonymous admin of that chat —
+// Telegram only substitutes it for genuine admins, so it doubles as admin
+// proof in update types that lack sender_chat (e.g. my_chat_member).
+export const GROUP_ANONYMOUS_BOT_ID = 1087968824;
+
 // Full "muted" permission set — no sending, no admin-lite actions.
 const MUTE_PERMISSIONS = {
   can_send_messages: false,

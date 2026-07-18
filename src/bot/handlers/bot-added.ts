@@ -1,5 +1,5 @@
 import { Context } from "grammy";
-import { checkBouncerAccess, getOrCreateGroup, getOrCreateUser } from "../helpers.js";
+import { checkBouncerAccess, getOrCreateGroup, getOrCreateUser, GROUP_ANONYMOUS_BOT_ID } from "../helpers.js";
 import { query } from "../../shared/db.js";
 
 export async function handleBotAdded(ctx: Context) {
@@ -16,29 +16,35 @@ export async function handleBotAdded(ctx: Context) {
     const addedBy = update.from;
     const chatId = update.chat.id;
 
-    // Verify the user who added the bot is actually an admin of the chat
-    try {
-        const member = await ctx.api.getChatMember(chatId, addedBy.id);
-        if (member.status !== "administrator" && member.status !== "creator") {
+    // Verify the user who added the bot is actually an admin of the chat.
+    // Anonymous admins are reported as the GroupAnonymousBot service account —
+    // Telegram only does that for genuine admins, so it counts as admin proof;
+    // getChatMember on the service account would fail and wrongly refuse them.
+    const addedByAnonymousAdmin = addedBy.id === GROUP_ANONYMOUS_BOT_ID;
+    if (!addedByAnonymousAdmin) {
+        try {
+            const member = await ctx.api.getChatMember(chatId, addedBy.id);
+            if (member.status !== "administrator" && member.status !== "creator") {
+                try {
+                    await ctx.api.sendMessage(
+                        chatId,
+                        "Only group admins can add Bouncer. Ask an admin to invite me.",
+                    );
+                    await ctx.api.leaveChat(chatId);
+                } catch (err) {
+                    console.error("[BOT] Failed to leave chat (non-admin adder):", err);
+                }
+                return;
+            }
+        } catch (err) {
+            console.error("[BOT] Failed to verify admin status:", err);
             try {
-                await ctx.api.sendMessage(
-                    chatId,
-                    "Only group admins can add Bouncer. Ask an admin to invite me.",
-                );
                 await ctx.api.leaveChat(chatId);
-            } catch (err) {
-                console.error("[BOT] Failed to leave chat (non-admin adder):", err);
+            } catch (leaveErr) {
+                console.error("[BOT] Failed to leave chat after verify failure:", leaveErr);
             }
             return;
         }
-    } catch (err) {
-        console.error("[BOT] Failed to verify admin status:", err);
-        try {
-            await ctx.api.leaveChat(chatId);
-        } catch (leaveErr) {
-            console.error("[BOT] Failed to leave chat after verify failure:", leaveErr);
-        }
-        return;
     }
 
     const access = await checkBouncerAccess(addedBy.id.toString());
