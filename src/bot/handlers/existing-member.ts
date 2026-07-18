@@ -174,15 +174,10 @@ export async function handleExistingMember(ctx: Context) {
 
   await safeMute(ctx.api, ctx.chat.id, ctx.from.id);
 
-  // Was the user already in PENDING state? If so, we've already sent them a prompt on
-  // an earlier message (before the delete cache was set) and shouldn't spam another.
-  const wasAlreadyPending =
-    memberResult.rows.length > 0 && memberResult.rows[0].status === "PENDING";
-
   // Set as pending with 24-hour deadline for existing members. Only set a new deadline
   // when transitioning INTO pending — if they're already pending, preserve their
   // existing deadline so a persistent spammer can't avoid the kick by sending messages.
-  await query(
+  const upsert = await query(
     `INSERT INTO members (group_id, user_id, status, verification_deadline)
      VALUES ($1, $2, 'PENDING', now() + interval '24 hours')
      ON CONFLICT (group_id, user_id) DO UPDATE SET
@@ -191,26 +186,35 @@ export async function handleExistingMember(ctx: Context) {
          WHEN members.status = 'PENDING' AND members.verification_deadline IS NOT NULL
            THEN members.verification_deadline
          ELSE now() + interval '24 hours'
-       END`,
+       END
+     RETURNING verification_deadline`,
     [groupId, user.id],
   );
 
-  if (!wasAlreadyPending) {
-    try {
-      // HTML parse mode (not Markdown v1) — see the matching change in
-      // new-member.ts for full rationale. Short version: first_name can
-      // contain `_` / `*` / etc. which break Markdown v1 parsing mid-message.
-      await ctx.reply([
-        `${escapeHtml(ctx.from.first_name || "")}, access to this group requires an Enjin NFT.`,
-        "",
-        "Your messages will be removed until you verify your wallet.",
-        `<a href="https://t.me/${process.env.BOT_USERNAME}?start=verify">Start verification</a>`,
-        "",
-        "You have 24 hours to verify or you'll be removed.",
-      ].join("\n"), { parse_mode: "HTML" });
-    } catch (err) {
-      console.error("[BOT] Failed to send verification prompt:", err);
-    }
+  // Prompt on every full-flow pass, not only on the VERIFIED→PENDING transition.
+  // A full flow runs at most ~once per cache TTL (1h) per user, so this can't
+  // spam — and it covers members who became PENDING outside this handler
+  // (wallet unlink, the wallet-less re-gate sweep), who previously had their
+  // messages deleted without ever being told why. The hours in the text come
+  // from the actual row deadline, so shorter windows (the 1h unlink deadline)
+  // are reported truthfully instead of a hardcoded "24 hours".
+  // HTML parse mode (not Markdown v1) — see new-member.ts for the rationale:
+  // first_name can contain `_` / `*` / etc. which break Markdown v1 mid-message.
+  const deadline: Date | null = upsert.rows[0]?.verification_deadline ?? null;
+  const hoursLeft = deadline ? Math.max(1, Math.ceil((deadline.getTime() - Date.now()) / 3600000)) : 24;
+  try {
+    await ctx.reply([
+      `${escapeHtml(ctx.from.first_name || "")}, access to this group requires an Enjin NFT.`,
+      "",
+      "Your messages will be removed until you verify your wallet.",
+      `<a href="https://t.me/${process.env.BOT_USERNAME}?start=verify">Start verification</a>`,
+      "",
+      hoursLeft <= 1
+        ? "You have less than an hour to verify or you'll be removed."
+        : `You have about ${hoursLeft} hours to verify or you'll be removed.`,
+    ].join("\n"), { parse_mode: "HTML" });
+  } catch (err) {
+    console.error("[BOT] Failed to send verification prompt:", err);
   }
 
   // Cache in 'delete' mode so subsequent messages from this user are deleted

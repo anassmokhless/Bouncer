@@ -3,7 +3,7 @@ import { Api } from "grammy";
 import { query } from "../../shared/db.js";
 import { checkNftOwnership, collectionExists, tokenExists } from "../../shared/enjin.js";
 import { requireLogin, requireGroupAdmin, requireBouncerPass } from "../middleware.js";
-import { isUserNotParticipantError } from "../../bot/helpers.js";
+import { isUserNotParticipantError, releasePendingMembers } from "../../bot/helpers.js";
 import { mutationLimiter } from "../rate-limits.js";
 
 const api = new Api(process.env.BOT_TOKEN!);
@@ -441,6 +441,15 @@ router.post("/:id/rules/:ruleId/delete", mutationLimiter, requireGroupAdmin, req
     `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
     [groupId, user.id, "RULE_REMOVED", JSON.stringify({ ruleId })],
   );
+
+  // If that was the last active rule, release members stuck in PENDING — the
+  // helper no-ops while any rule remains. No cache callback here: the
+  // checked-pairs cache lives in the bot process; its stale 'delete' entries
+  // age out via TTL within the hour.
+  const groupRow = await query(`SELECT telegram_id FROM groups WHERE id = $1`, [groupId]);
+  if (groupRow.rows.length > 0) {
+    await releasePendingMembers(api, groupRow.rows[0].telegram_id);
+  }
 
   res.redirect(`/dashboard/${groupId}`);
 });

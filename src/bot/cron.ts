@@ -219,7 +219,23 @@ async function pollPendingVerifications(bot: Bot) {
     const verifiedGroups: Array<{ groupId: string; memberId: string; groupTelegramId: string; collectionId: string; tokenId: string | null }> = [];
 
     for (const [, group] of groupMap) {
-      if (group.rules.length === 0) continue;
+      if (group.rules.length === 0) {
+        // Rule-less group: nothing to verify against. Instead of skipping (which
+        // left a stuck PENDING row un-releasable forever), reconcile: flip back
+        // to VERIFIED and unmute. Guarded so VERIFIED/KICKED/LEFT are untouched.
+        // No audit entry — no rule was passed; this is state reconciliation.
+        const released = await query(
+          `UPDATE members SET status = 'VERIFIED', verification_deadline = NULL
+           WHERE id = $1 AND status = 'PENDING'`,
+          [group.memberId],
+        );
+        if ((released.rowCount ?? 0) > 0) {
+          await safeUnmute(bot.api, group.groupTelegramId, row.user_telegram_id);
+          removeCheckedPair(group.groupTelegramId, row.user_telegram_id);
+          console.log(`[CRON] Released ${row.user_telegram_id} in rule-less group ${group.groupTelegramId} — nothing to verify against`);
+        }
+        continue;
+      }
 
       for (const rule of group.rules) {
         const hasNft = await checkNftOwnership(
@@ -357,6 +373,29 @@ async function recheckVerifiedMembers(bot: Bot) {
   // EXISTS filter pushes the "is this member due?" decision into SQL so we only load
   // members that actually need rechecking instead of every verified member in every
   // active group. A member is due if ANY of their group's rules has an interval
+  // Wallet-less VERIFIED members of ruled groups can never satisfy any rule —
+  // they are pre-first-rule joiners (new-member writes VERIFIED when a group
+  // has no rules yet). Without this they are permanently exempt: every
+  // checking path filters on wallet IS NOT NULL and the message handler skips
+  // VERIFIED rows. Fold them back into normal enforcement: PENDING with the
+  // same 24h window existing members get; cache-clear so their next message
+  // triggers the verification prompt; kick-expired enforces the deadline.
+  const regated = await query(
+    `UPDATE members m SET status = 'PENDING', verification_deadline = now() + interval '24 hours'
+     FROM groups g, users u
+     WHERE g.id = m.group_id AND u.id = m.user_id
+       AND m.status = 'VERIFIED' AND u.wallet_address IS NULL
+       AND g.is_active = true
+       AND EXISTS (SELECT 1 FROM nft_rules r WHERE r.group_id = m.group_id AND r.is_active = true)
+     RETURNING g.telegram_id AS group_telegram_id, u.telegram_id AS user_telegram_id`,
+  );
+  for (const r of regated.rows) {
+    removeCheckedPair(r.group_telegram_id, r.user_telegram_id);
+  }
+  if ((regated.rowCount ?? 0) > 0) {
+    console.log(`[CRON] Re-gated ${regated.rowCount} wallet-less VERIFIED member(s) — their groups have active rules now`);
+  }
+
   // that has elapsed since last_checked (equivalent to "min interval has elapsed").
   // Using EXISTS (not a WHERE predicate on r.check_interval_seconds) is important:
   // we need to load ALL rule rows for due members, so the NFT check loop evaluates
@@ -513,6 +552,10 @@ async function recheckVerifiedMembers(bot: Bot) {
 }
 
 async function kickExpiredPendingMembers(bot: Bot) {
+  // The active-rules EXISTS is the "zero rules = zero enforcement" safety net:
+  // members of rule-less groups are never kicked, even if a PENDING row with a
+  // deadline exists (legacy data, or an admin removed the last rule while
+  // members were mid-verification).
   const result = await query(
     `SELECT m.id, m.group_id, g.telegram_id AS group_telegram_id,
             m.user_id, u.telegram_id AS user_telegram_id,
@@ -521,7 +564,8 @@ async function kickExpiredPendingMembers(bot: Bot) {
      FROM members m
      JOIN groups g ON g.id = m.group_id
      JOIN users u ON u.id = m.user_id
-     WHERE m.status = 'PENDING' AND m.verification_deadline IS NOT NULL AND m.verification_deadline < now()`,
+     WHERE m.status = 'PENDING' AND m.verification_deadline IS NOT NULL AND m.verification_deadline < now()
+       AND EXISTS (SELECT 1 FROM nft_rules r WHERE r.group_id = m.group_id AND r.is_active = true)`,
   );
 
   for (const row of result.rows) {

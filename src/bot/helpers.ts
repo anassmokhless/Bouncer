@@ -124,6 +124,46 @@ export async function safeUnmute(
   }
 }
 
+/**
+ * Release every PENDING member of a group that no longer has active rules:
+ * status back to VERIFIED, deadline cleared, best-effort unmute. Called after
+ * a rule removal — with nothing left to verify against, keeping members
+ * PENDING would strand them (the verify-poll skips rule-less groups) even
+ * though the kick cron's rules-guard prevents the actual kick.
+ *
+ * Self-guarding: the NOT EXISTS makes this a no-op while the group still has
+ * any active rule, so call sites invoke it unconditionally after deactivating.
+ * No audit entries — nobody verified anything; this is state reconciliation.
+ *
+ * `onReleased` lets the bot process clear its in-memory checked-pairs cache
+ * (the dashboard can't — that cache lives in the bot container; its 'delete'
+ * entries age out via TTL within the hour).
+ */
+export async function releasePendingMembers(
+  api: Api,
+  groupTelegramId: string,
+  onReleased?: (groupTelegramId: string, userTelegramId: string) => void,
+): Promise<number> {
+  const released = await query(
+    `UPDATE members m SET status = 'VERIFIED', verification_deadline = NULL
+     FROM groups g, users u
+     WHERE g.id = m.group_id AND u.id = m.user_id
+       AND g.telegram_id = $1 AND m.status = 'PENDING'
+       AND NOT EXISTS (SELECT 1 FROM nft_rules r WHERE r.group_id = m.group_id AND r.is_active = true)
+     RETURNING u.telegram_id AS user_telegram_id`,
+    [groupTelegramId],
+  );
+
+  for (const row of released.rows) {
+    await safeUnmute(api, groupTelegramId, row.user_telegram_id);
+    onReleased?.(groupTelegramId, row.user_telegram_id);
+  }
+  if (released.rows.length > 0) {
+    console.log(`[RULES] Released ${released.rows.length} pending member(s) in now rule-less group ${groupTelegramId}`);
+  }
+  return released.rows.length;
+}
+
 // Escape characters that have special meaning in Telegram's HTML parse mode.
 // Only `<`, `>`, `&` need escaping — the HTML parse mode is far more forgiving
 // than Markdown v1, which requires escaping `_`, `*`, `[`, `]`, `(`, `)`, `` ` ``.

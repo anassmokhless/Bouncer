@@ -22,12 +22,18 @@ export async function unlinkCommand(ctx: Context) {
 
   const user = result.rows[0];
 
-  // Get all groups where this user is VERIFIED (needed for re-restricting)
+  // Get all groups where this user is VERIFIED (needed for re-restricting).
+  // Only groups with at least one active rule count: a rule-less group
+  // enforces nothing, so unlinking must not mute or re-gate the member there.
+  // (The verify-poll skips rule-less groups, so a PENDING row there could
+  // never be flipped back by re-verifying — the member would be kicked from
+  // a group that requires nothing.)
   const groups = await query(
     `SELECT g.telegram_id AS group_telegram_id
      FROM members m
      JOIN groups g ON g.id = m.group_id
-     WHERE m.user_id = $1 AND m.status = 'VERIFIED'`,
+     WHERE m.user_id = $1 AND m.status = 'VERIFIED'
+       AND EXISTS (SELECT 1 FROM nft_rules r WHERE r.group_id = m.group_id AND r.is_active = true)`,
     [user.id],
   );
 
@@ -57,7 +63,8 @@ export async function unlinkCommand(ctx: Context) {
     );
     await client.query(
       `UPDATE members SET status = 'PENDING', verification_deadline = now() + interval '1 hour'
-       WHERE user_id = $1 AND status = 'VERIFIED'`,
+       WHERE user_id = $1 AND status = 'VERIFIED'
+         AND group_id IN (SELECT group_id FROM nft_rules WHERE is_active = true)`,
       [user.id],
     );
     // Start the 5-minute admin-verify countdown on every group this user administers.

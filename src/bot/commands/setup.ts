@@ -1,7 +1,8 @@
 import { Bot, Context } from "grammy";
 import { query } from "../../shared/db.js";
-import { getOrCreateGroup, getOrCreateUser, checkBouncerAccess } from "../helpers.js";
+import { getOrCreateGroup, getOrCreateUser, checkBouncerAccess, releasePendingMembers } from "../helpers.js";
 import { collectionExists, tokenExists } from "../../shared/enjin.js";
+import { removeCheckedPair } from "../handlers/existing-member.js";
 //for group admins
 
 //check if user is group admin + holds bouncer pass
@@ -218,7 +219,7 @@ export function registerSetupCommands(bot: Bot) {
           "",
           `Existing members — to keep your access, <a href="https://t.me/${process.env.BOT_USERNAME}?start=verify">DM me and verify</a>.`,
           "",
-          "Anyone unverified will be removed on the next scheduled re-check.",
+          "Members without a linked wallet have 24 hours to verify; anyone who doesn't qualify will be removed on a scheduled re-check.",
         ].join("\n"),
         { parse_mode: "HTML" },
       );
@@ -317,9 +318,24 @@ export function registerSetupCommands(bot: Bot) {
         ],
       );
 
-      await ctx.reply(
-        `Rule ${ruleNumber} removed: Collection ${rule.collection_id}, Token ${rule.token_id || "Any"}.`,
+      // If that was the last active rule, the group enforces nothing anymore —
+      // release members stuck in PENDING (helper is a no-op while rules remain).
+      const releasedCount = await releasePendingMembers(ctx.api, chatId, removeCheckedPair);
+
+      const remaining = await query(
+        `SELECT COUNT(*)::int AS c FROM nft_rules WHERE group_id = $1 AND is_active = true`,
+        [group.id],
       );
+      const lines = [`Rule ${ruleNumber} removed: Collection ${rule.collection_id}, Token ${rule.token_id || "Any"}.`];
+      if (remaining.rows[0].c === 0) {
+        lines.push(
+          "",
+          releasedCount > 0
+            ? `No active rules remain — gating is off and ${releasedCount} pending member(s) were restored.`
+            : "No active rules remain — gating is off until you add a new rule.",
+        );
+      }
+      await ctx.reply(lines.join("\n"));
     } catch (err) {
       console.error("[BOT] /removerule failed:", err);
       try {
