@@ -44,6 +44,20 @@ export async function handleMemberLeft(ctx: Context) {
   const newStatus = update.new_chat_member.status;
   if (newStatus !== "left" && newStatus !== "kicked") return;
 
+  // Ignore removals the bot itself performed (kick-expired cron, re-check cron,
+  // manual dashboard recheck) — those code paths own the members-status write
+  // and the USER_KICKED/USER_BANNED audit entry. Telegram often delivers this
+  // chat_member update BEFORE the kicking transaction commits, so handling it
+  // here would win the race: we'd write LEFT + a USER_LEFT audit first, the
+  // kicker's guarded UPDATE would match zero rows, and the kick audit would be
+  // lost — silently undercounting the 5-kick ban escalation (which counts
+  // USER_KICKED rows). The existing status guard below can't prevent that
+  // ordering; checking the actor does.
+  if (update.from.id === ctx.me.id) {
+    console.log(`[BOT] chat_member removal of ${update.new_chat_member.user.id} in ${ctx.chat.id} was bot-initiated — kick path owns the DB transition`);
+    return;
+  }
+
   const telegramId = update.new_chat_member.user.id.toString();
   const chatId = ctx.chat.id.toString();
 

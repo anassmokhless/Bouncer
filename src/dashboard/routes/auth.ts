@@ -26,6 +26,14 @@ router.get("/telegram/callback", authLimiter, async (req: Request, res: Response
 
   const user = await upsertTelegramUser(data);
 
+  // Regenerate the session id on the anonymous → authenticated transition.
+  // Without this, a session id planted in the victim's browser before login
+  // (session fixation) would get silently upgraded to their identity, leaving
+  // the attacker's copy of the cookie authenticated too.
+  await new Promise<void>((resolve, reject) =>
+    req.session.regenerate((err) => (err ? reject(err) : resolve())),
+  );
+
   req.session.user = {
     id: user.id,
     telegramId: user.telegram_id,
@@ -62,6 +70,12 @@ router.get("/dev", async (req: Request, res: Response) => {
   }
 
   const user = result.rows[0];
+
+  // Same fixation defense as the real login above — the dev login creates an
+  // authenticated session too, so it regenerates the id the same way.
+  await new Promise<void>((resolve, reject) =>
+    req.session.regenerate((err) => (err ? reject(err) : resolve())),
+  );
 
   req.session.user = {
     id: user.id,
