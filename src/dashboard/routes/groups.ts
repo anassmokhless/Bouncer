@@ -4,7 +4,7 @@ import { query } from "../../shared/db.js";
 import { checkNftOwnership, collectionExists, tokenExists } from "../../shared/enjin.js";
 import { requireLogin, requireGroupAdmin, requireBouncerPass } from "../middleware.js";
 import { isUserNotParticipantError, releasePendingMembers } from "../../bot/helpers.js";
-import { mutationLimiter } from "../rate-limits.js";
+import { mutationLimiter, readLimiter } from "../rate-limits.js";
 
 const api = new Api(process.env.BOT_TOKEN!);
 
@@ -55,7 +55,7 @@ router.param("ruleId", (req, res, next, value) => {
 });
 
 // Groups list
-router.get("/", async (req: Request, res: Response) => {
+router.get("/", readLimiter, async (req: Request, res: Response) => {
   const user = req.session.user!;
 
   const result = await query(
@@ -78,7 +78,7 @@ router.get("/", async (req: Request, res: Response) => {
 });
 
 // Group detail
-router.get("/:id", requireGroupAdmin, async (req: Request, res: Response) => {
+router.get("/:id", readLimiter, requireGroupAdmin, async (req: Request, res: Response) => {
   const user = req.session.user!;
   const groupId = req.params.id as string;
 

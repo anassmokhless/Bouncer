@@ -121,6 +121,10 @@ without HTTPS on the domain you registered with `/setdomain`. And schedule
 `pg_dump` backups from day one; the bundled database is only as safe as the
 disk it lives on.
 
+Keep the host clock NTP-synced (the default on cloud VPSes). Dashboard login
+rejects Telegram auth blobs older than 5 minutes, so a host clock running more
+than a few minutes fast makes every login fail with "Invalid Telegram login".
+
 ## Architecture
 
 ```

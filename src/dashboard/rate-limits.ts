@@ -1,4 +1,4 @@
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import type { Request, Response } from "express";
 
 // Rate limiters for the dashboard. Same conventions as the contact-form
@@ -48,5 +48,28 @@ export const mutationLimiter = rateLimit({
   legacyHeaders: false,
   handler: (_req: Request, res: Response) => {
     res.status(429).send("Too many actions. Please slow down and try again in a few minutes.");
+  },
+});
+
+// Read limiter for the DB-heavy authenticated GETs (dashboard list, group
+// detail, audit search). publicLimiter exempts logged-in users so its
+// recheck-status poll isn't throttled, but "logged in" is not "trusted" —
+// anyone with a Telegram account can log in — so these routes need their own
+// budget. Keyed by session user id, not IP: a logged-in attacker can't rotate
+// identity the way they can rotate IPs, and it won't punish honest users
+// behind a shared NAT. The `?? ipKeyGenerator(...)` fallback is unreachable in
+// practice (requireLogin runs first and guarantees a user), but express-rate-
+// limit v8 flags any raw `req.ip` in a keyGenerator, and the helper normalizes
+// IPv6 to a subnet so the fallback can't be bypassed by address rotation if a
+// route is ever mounted without requireLogin. 120/min is far above real
+// browsing and leaves the 2s recheck poll (a different route) untouched.
+export const readLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  limit: 120,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  keyGenerator: (req: Request) => req.session?.user?.id ?? ipKeyGenerator(req.ip ?? "unknown"),
+  handler: (_req: Request, res: Response) => {
+    res.status(429).send("Too many requests. Please slow down and try again in a minute.");
   },
 });
