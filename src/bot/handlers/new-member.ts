@@ -20,7 +20,7 @@ export async function handleNewMembers(ctx: Context) {
 
   for (let i = 0; i < actualMembers.length; i += BATCH_SIZE) {
     const batch = actualMembers.slice(i, i + BATCH_SIZE);
-    await Promise.allSettled(batch.map(async (member) => {
+    const results = await Promise.allSettled(batch.map(async (member) => {
       const telegramId = member.id.toString();
       const user = await getOrCreateUser(telegramId, member.username, member.first_name);
 
@@ -121,5 +121,16 @@ export async function handleNewMembers(ctx: Context) {
         }
       }
     }));
+
+    // Surface per-member failures. Promise.allSettled never rejects, so without
+    // this a joiner dropped by a DB/Telegram error (e.g. getOrCreateUser threw
+    // before safeMute) leaves no trace — unrestricted, unlogged, no PENDING row.
+    // They self-heal on their next message (handleExistingMember re-gates them),
+    // but the log makes the gap visible instead of silent.
+    results.forEach((r, idx) => {
+      if (r.status === "rejected") {
+        console.error(`[BOT] Failed to process new member ${batch[idx].id} in ${chatId}:`, r.reason);
+      }
+    });
   }
 }

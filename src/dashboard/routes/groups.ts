@@ -198,49 +198,65 @@ router.post("/:id/recheck", mutationLimiter, requireGroupAdmin, requireBouncerPa
     return;
   }
 
-  const groupResult = await query(`SELECT telegram_id FROM groups WHERE id = $1`, [groupId]);
-  if (groupResult.rows.length === 0) {
-    res.status(404).json({ error: "Group not found" });
-    return;
-  }
-  const groupTelegramId = groupResult.rows[0].telegram_id;
-
-  const rules = await query(
-    `SELECT * FROM nft_rules WHERE group_id = $1 AND is_active = true`,
-    [groupId],
-  );
-
-  // Guard the zero-rules case: with no active rules the recheck loop below never
-  // sets stillHolds=true, so every verified member falls into the kick branch and
-  // gets banned. The cron recheck sidesteps this via an INNER JOIN on nft_rules;
-  // here we reject the request outright. The UI also disables the button when there
-  // are no rules, so this is the backstop for direct POSTs (double-click, stale
-  // tab, curl).
-  if (rules.rows.length === 0) {
-    res.status(400).json({ error: "This group has no active rules — nothing to re-check." });
-    return;
-  }
-
-  const members = await query(
-    `SELECT m.id, u.wallet_address, u.id AS user_id, u.telegram_id AS user_telegram_id
-     FROM members m JOIN users u ON u.id = m.user_id
-     WHERE m.group_id = $1 AND m.status = 'VERIFIED'`,
-    [groupId],
-  );
-
-  const BATCH_SIZE = 5;
-  const walleted = members.rows.filter((m: { wallet_address: string | null }) => m.wallet_address);
-
-  // Initialise the job record BEFORE dispatching so the client's first poll sees it.
+  // Claim the slot synchronously — before the first await below. If the 409
+  // guard above and this .set() are separated by an await, two concurrent
+  // requests (a double-click) both pass the guard and start duplicate ban loops
+  // with duplicate USER_KICKED_MANUAL audits. Every early exit past this point
+  // releases the slot: pruneRechecksInProgress never reclaims a "running" job,
+  // so a leaked claim would 409 the group until restart. total is set once known.
   const job: RecheckJob = {
     groupId,
-    total: walleted.length,
+    total: 0,
     checked: 0,
     kicked: 0,
     status: "running",
     startedAt: Date.now(),
   };
   rechecksInProgress.set(groupId, job);
+
+  let groupTelegramId!: string;
+  let rules!: Awaited<ReturnType<typeof query>>;
+  let walleted!: Array<{ id: string; wallet_address: string; user_id: string; user_telegram_id: string }>;
+  try {
+    const groupResult = await query(`SELECT telegram_id FROM groups WHERE id = $1`, [groupId]);
+    if (groupResult.rows.length === 0) {
+      rechecksInProgress.delete(groupId);
+      res.status(404).json({ error: "Group not found" });
+      return;
+    }
+    groupTelegramId = groupResult.rows[0].telegram_id;
+
+    rules = await query(
+      `SELECT * FROM nft_rules WHERE group_id = $1 AND is_active = true`,
+      [groupId],
+    );
+
+    // Guard the zero-rules case: with no active rules the recheck loop below never
+    // sets stillHolds=true, so every verified member falls into the kick branch and
+    // gets banned. The cron recheck sidesteps this via an INNER JOIN on nft_rules;
+    // here we reject the request outright. The UI also disables the button when there
+    // are no rules, so this is the backstop for direct POSTs (double-click, stale
+    // tab, curl).
+    if (rules.rows.length === 0) {
+      rechecksInProgress.delete(groupId);
+      res.status(400).json({ error: "This group has no active rules — nothing to re-check." });
+      return;
+    }
+
+    const members = await query(
+      `SELECT m.id, u.wallet_address, u.id AS user_id, u.telegram_id AS user_telegram_id
+       FROM members m JOIN users u ON u.id = m.user_id
+       WHERE m.group_id = $1 AND m.status = 'VERIFIED'`,
+      [groupId],
+    );
+    walleted = members.rows.filter((m: { wallet_address: string | null }) => m.wallet_address);
+  } catch (err) {
+    rechecksInProgress.delete(groupId); // release the claimed slot on any query error
+    throw err;
+  }
+
+  const BATCH_SIZE = 5;
+  job.total = walleted.length;
 
   // Capture session-scoped values before handing off to the background task — req/res
   // are not valid outside this handler.

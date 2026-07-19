@@ -15,7 +15,7 @@ import { registerSetupCommands } from "./commands/setup.js";
 import { handleNewMembers } from "./handlers/new-member.js";
 import { handleBotAdded } from "./handlers/bot-added.js";
 import { handleMemberLeft, handleAdminDemoted } from "./handlers/member-left.js";
-import { handleExistingMember } from "./handlers/existing-member.js";
+import { handleExistingMember, removeCheckedPair } from "./handlers/existing-member.js";
 import { handleChatMigration } from "./handlers/migrate.js";
 import { startCronJobs } from "./cron.js";
 
@@ -42,7 +42,14 @@ bot.use(async (ctx, next) => {
         await handleExistingMember(ctx);
         return;
       }
-    } catch {
+    } catch (err) {
+      // Admin check failed (Telegram blip / 429). Fail CLOSED, not open: defer
+      // to handleExistingMember rather than silently dropping through. Its cache
+      // fast-path still deletes a known-PENDING user's message with no API call,
+      // so a `/`-prefix can't bypass gating during an outage; if the user isn't
+      // cached it applies its own backoff. Either way the command is blocked.
+      console.error("[BOT] Command-gate admin check failed, deferring to gating:", err);
+      await handleExistingMember(ctx);
       return;
     }
   }
@@ -86,6 +93,14 @@ bot.on("chat_member", async (ctx) => {
 
   if (wasAdmin && !isAdmin) {
     await handleAdminDemoted(ctx);
+  }
+
+  if (!wasAdmin && isAdmin) {
+    // Promoted to admin: drop any stale existing-member cache entry so their
+    // messages aren't deleted for up to the ~1h TTL. The next message re-checks,
+    // sees admin, and passes through. (Promotion has no DB state to change —
+    // group_admins is only populated by /setup/rule commands, not membership.)
+    removeCheckedPair(ctx.chat.id.toString(), update.new_chat_member.user.id.toString());
   }
 
   if (newStatus === "left" || newStatus === "kicked") {
