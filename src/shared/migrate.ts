@@ -13,10 +13,18 @@ const filePath: string = path.resolve(
   "../../migrations/001_init.sql",
 );
 
+// SSL driven by the connection string, same rule as shared/db.ts — managed
+// providers put sslmode=... in the URL; the bundled docker-compose Postgres
+// speaks plain TCP. Hardcoding ssl:true made migrate.js unable to connect to
+// the local container at all (server does not support SSL).
+const useSsl = /\bsslmode=(require|verify-ca|verify-full|prefer)\b/.test(
+  process.env.DATABASE_URL ?? "",
+);
+
 //connection to db
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: true,
+  ssl: useSsl,
 });
 
 //actual migration function

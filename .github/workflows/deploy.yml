@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - run: npm ci
       - run: npx tsc --noEmit
@@ -36,5 +36,5 @@ jobs:
             cd /home/deploy/tgbot
             git pull origin main
             docker compose -f docker-compose.prod.yml up -d --build
-            docker exec tgbot-dashboard node dist/shared/migrate.js || true
+            docker exec tgbot-dashboard node dist/shared/migrate.js
             docker image prune -f

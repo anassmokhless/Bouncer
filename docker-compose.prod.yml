@@ -21,8 +21,11 @@ services:
     build: .
     container_name: tgbot-dashboard
     restart: unless-stopped
+    # Bind to loopback only: nginx reverse-proxies to 127.0.0.1:3000 on the same
+    # host, and publishing on 0.0.0.0 would expose the dashboard directly on the
+    # VPS's public IP (Docker's iptables rules bypass ufw), skipping nginx/TLS.
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     env_file:
       - .env
     # environment: wins over env_file — production behavior (secure cookies,
