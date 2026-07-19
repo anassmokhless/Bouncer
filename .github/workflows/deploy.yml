@@ -26,7 +26,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to VPS via SSH
-        uses: appleboy/ssh-action@v1
+        # Pinned to a commit SHA (not the mutable @v1 tag) — this action receives
+        # VPS_SSH_KEY, so a hijacked tag would mean prod SSH access. Update the
+        # SHA deliberately when bumping. Currently v1.
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
