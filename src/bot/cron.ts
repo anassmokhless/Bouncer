@@ -217,6 +217,11 @@ async function pollPendingVerifications(bot: Bot) {
 
     // Check NFT ownership per group (external API calls, outside transaction)
     const verifiedGroups: Array<{ groupId: string; memberId: string; groupTelegramId: string; collectionId: string; tokenId: string | null }> = [];
+    // Set when a group's ownership check was entirely inconclusive (every rule
+    // returned null: Enjin error, or a wallet too large to paginate). We must
+    // NOT finalize the verification in that case — see the guarded delete/notify
+    // below.
+    let sawInconclusiveGroup = false;
 
     for (const [, group] of groupMap) {
       if (group.rules.length === 0) {
@@ -237,6 +242,8 @@ async function pollPendingVerifications(bot: Bot) {
         continue;
       }
 
+      let holds = false;
+      let sawCleanResult = false; // at least one rule gave a decisive true/false
       for (const rule of group.rules) {
         const hasNft = await checkNftOwnership(
           walletAddress,
@@ -245,8 +252,10 @@ async function pollPendingVerifications(bot: Bot) {
           rule.minBalance,
         );
 
-        if (hasNft === null) continue; // API error — skip this rule
+        if (hasNft === null) continue; // API error / pagination cap — inconclusive
+        sawCleanResult = true;
         if (hasNft) {
+          holds = true;
           verifiedGroups.push({
             groupId: group.groupId,
             memberId: group.memberId,
@@ -257,6 +266,11 @@ async function pollPendingVerifications(bot: Bot) {
           break;
         }
       }
+
+      // Every rule for this group errored and the member wasn't verified here:
+      // we couldn't fairly decide. Flag it so we retry instead of finalizing a
+      // holder as "no access" (which would strand them PENDING → kicked).
+      if (!holds && !sawCleanResult) sawInconclusiveGroup = true;
     }
 
     // Transaction: link wallet + delete pending + update memberships + audit logs
@@ -269,7 +283,13 @@ async function pollPendingVerifications(bot: Bot) {
         [walletAddress, row.user_id],
       );
 
-      await client.query(`DELETE FROM pending_verifications WHERE id = $1`, [row.id]);
+      // Keep the pending row when any group was inconclusive so the next tick
+      // retries once Enjin recovers; deleting it here strands a real holder as
+      // PENDING with no recheck path, and kick-expired would then remove them.
+      // The row's expires_at still bounds the retries.
+      if (!sawInconclusiveGroup) {
+        await client.query(`DELETE FROM pending_verifications WHERE id = $1`, [row.id]);
+      }
 
       for (const vg of verifiedGroups) {
         // Two-step write: scheid transitie (audit-waardig) van idempotente
@@ -350,6 +370,13 @@ async function pollPendingVerifications(bot: Bot) {
       );
       removeCheckedPair(vg.groupTelegramId, row.user_telegram_id);
     }
+
+    // Held the pending row for a retry (some group was inconclusive): don't
+    // notify yet. A "you don't hold the NFTs" message would be wrong here, and
+    // it would repeat every 15s tick — the resolving tick sends the real one.
+    // Verified groups (if any) were already unmuted above, so partial progress
+    // isn't lost.
+    if (sawInconclusiveGroup) continue;
 
     // Notify the user
     let message: string;
