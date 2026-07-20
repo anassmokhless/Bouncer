@@ -2,20 +2,8 @@ import { Context } from "grammy";
 import { query, pool } from "../../shared/db.js";
 import { removeCheckedPair } from "./existing-member.js";
 
-/**
- * Called when a user transitions from administrator/creator to anything else.
- * Prunes their row from `group_admins` so stale "admin on paper only" rows
- * don't keep a group alive through the early-access gate
- * (leaveUnverifiedGroups iterates group_admins and survives the group if any
- * of them still holds the Bouncer Pass — a demoted user shouldn't count).
- *
- * Dispatched from bot/index.ts's chat_member router based on status
- * transition; the routing also calls handleMemberLeft for users who went all
- * the way to left/kicked, so demote-then-leave chains are fully handled.
- *
- * Idempotent: no-op when the user isn't in group_admins (most Telegram admins
- * aren't — only those who ran /addrule or added the bot are recorded).
- */
+// On admin → non-admin, drop the user's group_admins row so a demoted admin no
+// longer counts toward the early-access gate. No-op if they weren't recorded.
 export async function handleAdminDemoted(ctx: Context) {
   const update = ctx.chatMember;
   if (!update || !ctx.chat) return;
@@ -23,10 +11,8 @@ export async function handleAdminDemoted(ctx: Context) {
   const telegramId = update.new_chat_member.user.id.toString();
   const chatId = ctx.chat.id.toString();
 
-  // Self-contained error handling: the chat_member router calls this and then
-  // handleMemberLeft independently, so a DB error here must not reject out of
-  // the router and skip the LEFT-transition write (a demote-straight-to-kicked
-  // would otherwise leave the members row un-flipped).
+  // Swallow errors: the router calls this then handleMemberLeft independently,
+  // so a throw here must not skip the LEFT write on a demote-straight-to-kicked.
   try {
     const result = await query(
       `DELETE FROM group_admins
@@ -52,15 +38,10 @@ export async function handleMemberLeft(ctx: Context) {
   const newStatus = update.new_chat_member.status;
   if (newStatus !== "left" && newStatus !== "kicked") return;
 
-  // Ignore removals the bot itself performed (kick-expired cron, re-check cron,
-  // manual dashboard recheck) — those code paths own the members-status write
-  // and the USER_KICKED/USER_BANNED audit entry. Telegram often delivers this
-  // chat_member update BEFORE the kicking transaction commits, so handling it
-  // here would win the race: we'd write LEFT + a USER_LEFT audit first, the
-  // kicker's guarded UPDATE would match zero rows, and the kick audit would be
-  // lost — silently undercounting the 5-kick ban escalation (which counts
-  // USER_KICKED rows). The existing status guard below can't prevent that
-  // ordering; checking the actor does.
+  // Ignore removals the bot itself performed — the kick paths own the status
+  // write and the kick audit. Telegram often delivers this event before the
+  // kick transaction commits, so handling it here would race ahead and write a
+  // spurious USER_LEFT, dropping the USER_KICKED the ban escalation counts.
   if (update.from.id === ctx.me.id) {
     console.log(`[BOT] chat_member removal of ${update.new_chat_member.user.id} in ${ctx.chat.id} was bot-initiated — kick path owns the DB transition`);
     return;
@@ -69,13 +50,8 @@ export async function handleMemberLeft(ctx: Context) {
   const telegramId = update.new_chat_member.user.id.toString();
   const chatId = ctx.chat.id.toString();
 
-  // Atomic UPDATE...RETURNING with a status guard. The guard prevents a race
-  // where a kick cron has already committed status=KICKED and the Telegram
-  // API response to its own banChatMember call triggers THIS chat_member
-  // event. Without the guard we'd overwrite KICKED → LEFT and insert a
-  // spurious USER_LEFT audit entry on top of the cron's USER_KICKED.
-  // Splitting the SELECT from the UPDATE also allowed cron's COMMIT to slip
-  // in between them; merging the two into one atomic statement closes the gap.
+  // Atomic UPDATE...RETURNING guarded on status IN (VERIFIED, PENDING): only
+  // flip live members to LEFT, never overwrite a KICKED a cron just committed.
   let didUpdate = false;
   const client = await pool.connect();
   try {
@@ -111,7 +87,7 @@ export async function handleMemberLeft(ctx: Context) {
   }
 
   if (didUpdate) {
-    // Clear from existing-member cache so they get re-checked if they rejoin
+    // Clear the cache so they re-check on rejoin.
     removeCheckedPair(chatId, telegramId);
     console.log(`[BOT] Member ${telegramId} left group ${chatId}`);
   }

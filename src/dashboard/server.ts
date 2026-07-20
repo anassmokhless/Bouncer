@@ -24,20 +24,16 @@ import { publicLimiter } from "./rate-limits.js";
 const app = express();
 const PgStore = connectPgSimple(session);
 
-// Trust proxy — env-configurable so multi-hop deployments (e.g. Cloudflare → nginx → app)
-// can set TRUST_PROXY=2. Defaults to 1 (single reverse-proxy hop), which matches the
-// documented nginx setup. Numeric strings are parsed as hop counts; non-numeric values
-// pass through so Express keywords like "loopback" or "uniquelocal" still work.
+// Reverse-proxy hop count (default 1). A number sets hop count; a non-numeric
+// value passes through so Express keywords like "loopback" still work.
 const trustProxyRaw = process.env.TRUST_PROXY ?? "1";
 const trustProxyNum = Number(trustProxyRaw);
 app.set("trust proxy", Number.isFinite(trustProxyNum) && trustProxyRaw.trim() !== "" ? trustProxyNum : trustProxyRaw);
 app.set("view engine", "ejs");
 app.set("views", path.resolve(import.meta.dirname, "../../views"));
 
-// Per-request CSP nonce. Set before helmet so its script-src directive can read
-// it, and exposed on res.locals so templates render <script nonce="...">. This
-// lets script-src drop 'unsafe-inline': an injected inline <script> can't carry
-// the unguessable per-request nonce, so the browser refuses to run it.
+// Per-request CSP nonce, set before helmet (its script-src reads it) and exposed
+// on res.locals for <script nonce="...">. Lets script-src drop 'unsafe-inline'.
 app.use((_req, res, next) => {
   res.locals.cspNonce = crypto.randomBytes(16).toString("base64");
   next();
@@ -48,30 +44,21 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        // Inline <script> blocks carry the per-request nonce (middleware above),
-        // so 'unsafe-inline' is intentionally gone — an injected inline script
-        // can't guess the nonce. 'unsafe-eval' stays: the Telegram Login Widget
-        // compiles its data-onauth attribute into a Function() and won't render
-        // without it. That's the one remaining relaxation, scoped to this single
-        // external widget.
+        // No 'unsafe-inline' — inline scripts use the nonce. 'unsafe-eval' stays:
+        // the Telegram Login Widget compiles data-onauth via Function().
         scriptSrc: [
           "'self'",
           "'unsafe-eval'",
           "https://telegram.org",
           (_req, res) => `'nonce-${(res as express.Response).locals.cspNonce}'`,
         ],
-        // All inline event handlers (onclick/onsubmit) were moved to
-        // addEventListener, so inline handler attributes are fully blocked.
+        // No inline event-handler attributes (all moved to addEventListener).
         scriptSrcAttr: ["'none'"],
         frameSrc: ["'self'", "https://oauth.telegram.org"],
         imgSrc: ["'self'", "data:"],
       },
     },
-    // Helmet's default COOP is "same-origin", which breaks cross-origin popup
-    // postMessage — specifically, the Telegram Login Widget's popup on
-    // oauth.telegram.org can't send auth data back to the parent window here.
-    // "same-origin-allow-popups" keeps opener isolation for non-popup pages but
-    // allows popups we open to communicate back. Required for the widget.
+    // Let the Telegram widget's oauth.telegram.org popup postMessage back to us.
     crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
   }),
 );
@@ -95,27 +82,18 @@ app.use(
   }),
 );
 
-// Anonymous-traffic rate limit. Mounted after the session middleware because
-// its skip() reads req.session.user; static assets are served earlier in the
-// chain and stay outside the budget.
+// After session so its skip() can read req.session.user.
 app.use(publicLimiter);
 
-// CSRF protection via the double-submit cookie pattern. The token is stored in
-// a dedicated cookie (NOT the session) and mirrored in form bodies / X-CSRF-Token
-// headers. On POST we just verify the two match. A cross-origin attacker can't
-// read our cookie from their page, so they can't forge a request whose body
-// token matches our cookie — that's what makes it CSRF-safe.
-//
-// Why not store it on req.session like before? Anonymous visitors (including
-// bot scanners) would trigger session row creation just by loading a page,
-// polluting the `session` table with empty rows. Moving CSRF out of the session
-// means sessions are only ever created for users who actually log in.
+// CSRF via double-submit cookie: the token lives in its own cookie (not the
+// session, so anonymous visits don't create session rows) and must match the
+// _csrf field / X-CSRF-Token header on POST.
 const CSRF_COOKIE_NAME = "csrf-token";
 
 app.use((req, res, next) => {
   let token = req.cookies?.[CSRF_COOKIE_NAME] as string | undefined;
 
-  // First request without a token — mint one and set it as a cookie.
+  // Mint one on first request.
   if (!token) {
     token = crypto.randomBytes(32).toString("hex");
     res.cookie(CSRF_COOKIE_NAME, token, {
@@ -126,9 +104,7 @@ app.use((req, res, next) => {
     });
   }
 
-  // Expose to EJS templates under the same name so existing `<%= csrfToken %>`
-  // usages keep working unchanged.
-  res.locals.csrfToken = token;
+  res.locals.csrfToken = token; // for <%= csrfToken %> in templates
 
   if (req.method === "POST") {
     const submitted = req.body?._csrf || req.headers["x-csrf-token"];
@@ -140,10 +116,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Login page. Telegram widget uses data-onauth (JS callback) instead of
-// data-auth-url — the widget calls a JS function with the auth blob, which
-// POSTs it to /auth/telegram/callback (body, not query string, so the signed
-// blob never lands in a URL). Avoids the popup-redirect 499s in nginx too.
 app.get("/login", (req, res) => {
   if (req.session.user) {
     res.redirect("/dashboard");
@@ -151,8 +123,7 @@ app.get("/login", (req, res) => {
   }
   res.render("login", {
     botUsername: process.env.BOT_USERNAME,
-    // Mirrors the /auth/dev guard exactly — the dev-login form should only be
-    // offered when the route behind it is actually enabled.
+    // Same guard as the /auth/dev route — only offer the form when it's enabled.
     isDev: process.env.ENABLE_DEV_LOGIN === "true" && process.env.NODE_ENV !== "production",
   });
 });

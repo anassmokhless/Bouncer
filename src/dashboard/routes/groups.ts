@@ -11,10 +11,8 @@ const api = new Api(process.env.BOT_TOKEN!);
 const router = Router();
 router.use(requireLogin);
 
-// Manual-recheck job tracking. Holds in-memory state for background recheck tasks so
-// we can return HTTP 202 immediately (not block the socket for minutes on large groups)
-// and let the client poll a separate status endpoint for progress. Keyed by groupId —
-// one concurrent job per group is enough for admin-initiated rechecks.
+// In-memory state for background recheck jobs (keyed by groupId), so the POST
+// returns 202 immediately and the client polls a status endpoint. One per group.
 type RecheckJob = {
   groupId: string;
   total: number;
@@ -26,9 +24,9 @@ type RecheckJob = {
   finishedAt?: number;
 };
 const rechecksInProgress = new Map<string, RecheckJob>();
-const JOB_RETENTION_MS = 5 * 60 * 1000; // 5 min — long enough for a late poll to see the result, short enough to auto-cleanup
+const JOB_RETENTION_MS = 5 * 60 * 1000; // keep finished jobs 5 min for late polls
 
-/** Opportunistic cleanup: drop completed jobs older than the retention window. */
+// Drop finished jobs past the retention window.
 function pruneRechecksInProgress() {
   const cutoff = Date.now() - JOB_RETENTION_MS;
   for (const [key, job] of rechecksInProgress) {
@@ -70,8 +68,7 @@ router.get("/", readLimiter, async (req: Request, res: Response) => {
     [user.telegramId],
   );
 
-  // requireBouncerPass middleware redirects here with ?accessError=... when
-  // a user lacking the pass tries to mutate; render it as a banner.
+  // ?accessError=... banner from requireBouncerPass.
   const accessError = typeof req.query.accessError === "string" ? req.query.accessError : null;
 
   res.render("dashboard", { user, groups: result.rows, accessError });
@@ -109,8 +106,7 @@ router.get("/:id", readLimiter, requireGroupAdmin, async (req: Request, res: Res
   let countWhere = `WHERE m.group_id = $1`;
   if (search) {
     countParams.push(`%${search}%`);
-    // ILIKE op wallet_address werkt ook met NULL (geeft NULL terug → falsy),
-    // dus geen coalesce nodig. Users zonder wallet matchen 'm simpelweg niet.
+    // ILIKE on a NULL wallet_address is NULL (falsy), so no coalesce needed.
     countWhere += ` AND (u.username ILIKE $2 OR u.first_name ILIKE $2 OR u.wallet_address ILIKE $2)`;
   }
 
@@ -129,13 +125,9 @@ router.get("/:id", readLimiter, requireGroupAdmin, async (req: Request, res: Res
     : `WHERE m.group_id = $1`;
   const memberLimit = search ? `LIMIT $3 OFFSET $4` : `LIMIT $2 OFFSET $3`;
 
-  // Whitelisted ORDER BY clauses — NEVER interpolate raw user input into SQL.
-  // Elke sortable kolom heeft een asc/desc variant. Status krijgt een custom
-  // case-volgorde (PENDING eerst — die wil een admin meestal zien, dan
-  // VERIFIED, dan KICKED, dan LEFT). Alle niet-tijd-gebaseerde sorts krijgen
-  // `m.created_at DESC` als secundaire tie-breaker voor deterministische
-  // paginatie. Wallets/last_checked gebruiken NULLS LAST zodat lege waarden
-  // niet de eerste pagina domineren.
+  // Whitelisted ORDER BY — never interpolate the sort param into SQL directly.
+  // Status sorts by a custom order (PENDING first); created_at DESC is the
+  // tie-breaker for stable pagination; wallet/last_checked use NULLS LAST.
   const SORT_OPTIONS: Record<string, string> = {
     "user-asc": "COALESCE(u.first_name, u.username, '') ASC, m.created_at DESC",
     "user-desc": "COALESCE(u.first_name, u.username, '') DESC, m.created_at DESC",
@@ -158,14 +150,11 @@ router.get("/:id", readLimiter, requireGroupAdmin, async (req: Request, res: Res
     memberParams,
   );
 
-  // If the admin just tried to add a rule and it failed validation, the POST
-  // handler redirected back here with ?ruleError=... so we can render a banner.
+  // ?ruleError=... banner from a failed /rules POST.
   const ruleError = typeof req.query.ruleError === "string" ? req.query.ruleError : null;
-  // Same pattern for the Bouncer Pass gate (requireBouncerPass middleware).
   const accessError = typeof req.query.accessError === "string" ? req.query.accessError : null;
 
-  // Valideer sort naar de template — als het geen bekende key was, val terug
-  // op 'joined-desc' zodat de template-helper niet onzin-arrows toont.
+  // Fall back to 'joined-desc' for an unknown sort key.
   const validatedSort = SORT_OPTIONS[sortKey] ? sortKey : "joined-desc";
 
   res.render("group", {
@@ -175,17 +164,8 @@ router.get("/:id", readLimiter, requireGroupAdmin, async (req: Request, res: Res
   });
 });
 
-// Manual re-check — backgrounded.
-//
-// The old implementation awaited the entire recheck loop before responding, which held
-// the HTTP socket open for up to minutes on large groups. Most reverse proxies kill
-// connections after 60-120s, so admins of bigger groups got timeout errors even though
-// the work completed server-side. This version returns 202 immediately and runs the
-// recheck in the background; the client polls GET /:id/recheck/status for progress.
-//
-// Concurrency: one running job per group (second admin clicking recheck while one is
-// in progress gets 409). Completed jobs are retained for JOB_RETENTION_MS so clients
-// that poll late still see the final result, then auto-pruned.
+// Manual re-check, backgrounded: return 202 and run the loop async (it can take
+// minutes on large groups). One running job per group — a second click gets 409.
 router.post("/:id/recheck", mutationLimiter, requireGroupAdmin, requireBouncerPass, async (req: Request, res: Response) => {
   const user = req.session.user!;
   const groupId = req.params.id as string;
@@ -198,12 +178,9 @@ router.post("/:id/recheck", mutationLimiter, requireGroupAdmin, requireBouncerPa
     return;
   }
 
-  // Claim the slot synchronously — before the first await below. If the 409
-  // guard above and this .set() are separated by an await, two concurrent
-  // requests (a double-click) both pass the guard and start duplicate ban loops
-  // with duplicate USER_KICKED_MANUAL audits. Every early exit past this point
-  // releases the slot: pruneRechecksInProgress never reclaims a "running" job,
-  // so a leaked claim would 409 the group until restart. total is set once known.
+  // Claim the slot synchronously, before the first await — otherwise a
+  // double-click races past the 409 guard and starts two ban loops. Every early
+  // exit past here must release the slot (a leaked "running" job 409s till restart).
   const job: RecheckJob = {
     groupId,
     total: 0,
@@ -231,12 +208,9 @@ router.post("/:id/recheck", mutationLimiter, requireGroupAdmin, requireBouncerPa
       [groupId],
     );
 
-    // Guard the zero-rules case: with no active rules the recheck loop below never
-    // sets stillHolds=true, so every verified member falls into the kick branch and
-    // gets banned. The cron recheck sidesteps this via an INNER JOIN on nft_rules;
-    // here we reject the request outright. The UI also disables the button when there
-    // are no rules, so this is the backstop for direct POSTs (double-click, stale
-    // tab, curl).
+    // With no active rules the loop below never sets stillHolds, so every member
+    // would fall into the kick branch — reject instead. (The UI disables the
+    // button too; this is the backstop for direct POSTs.)
     if (rules.rows.length === 0) {
       rechecksInProgress.delete(groupId);
       res.status(400).json({ error: "This group has no active rules — nothing to re-check." });
@@ -258,12 +232,10 @@ router.post("/:id/recheck", mutationLimiter, requireGroupAdmin, requireBouncerPa
   const BATCH_SIZE = 5;
   job.total = walleted.length;
 
-  // Capture session-scoped values before handing off to the background task — req/res
-  // are not valid outside this handler.
+  // Capture what the background task needs — req/res aren't valid outside the handler.
   const triggeredBy = user.telegramId;
 
-  // Fire-and-forget background work. Errors are captured into the job record so the
-  // client can surface them via the status endpoint.
+  // Fire-and-forget; errors land in the job record for the status endpoint.
   (async () => {
     try {
       for (let i = 0; i < walleted.length; i += BATCH_SIZE) {
@@ -297,8 +269,7 @@ router.post("/:id/recheck", mutationLimiter, requireGroupAdmin, requireBouncerPa
               kickSuccess = true;
             } catch (err) {
               if (isUserNotParticipantError(err)) {
-                // User already left — stop retrying, reconcile DB with reality.
-                // Guarded VERIFIED → LEFT; no USER_KICKED_MANUAL audit (we didn't kick).
+                // Already left — reconcile to LEFT (guarded), no kick audit.
                 await query(`UPDATE members SET status = 'LEFT' WHERE id = $1 AND status = 'VERIFIED'`, [member.id]);
                 console.log(`[DASHBOARD] ${member.user_telegram_id} already left — marked LEFT, skipping kick`);
                 return;
@@ -363,8 +334,7 @@ router.post("/:id/rules", mutationLimiter, requireGroupAdmin, requireBouncerPass
 
   const { collectionId, tokenId, minBalance, checkInterval } = req.body;
 
-  // Helper: redirect back to the group page with an error message that the view
-  // renders as a dismissable banner above the add-rule form.
+  // Redirect back with ?ruleError=... for the view's banner.
   const redirectWithError = (msg: string) => {
     res.redirect(`/dashboard/${groupId}?ruleError=${encodeURIComponent(msg)}`);
   };
@@ -374,8 +344,7 @@ router.post("/:id/rules", mutationLimiter, requireGroupAdmin, requireBouncerPass
     return;
   }
 
-  // Enjin collection/token IDs are numeric. Reject non-numeric input early so admins get
-  // clear feedback instead of silently-broken rules that never verify anyone.
+  // Collection/token IDs are numeric.
   if (!/^\d+$/.test(collectionId)) {
     redirectWithError("Collection ID must be numeric.");
     return;
@@ -385,8 +354,7 @@ router.post("/:id/rules", mutationLimiter, requireGroupAdmin, requireBouncerPass
     return;
   }
 
-  // Verify collection (and token, if specified) actually exist on Enjin. Prevents
-  // admins from saving a typo'd ID that would never verify anyone.
+  // Confirm the collection (and token) exist on Enjin — catches typo'd IDs.
   const collectionOk = await collectionExists(collectionId);
   if (collectionOk === false) {
     redirectWithError(`Collection ${collectionId} was not found on the Enjin blockchain. Double-check the ID.`);
@@ -411,12 +379,8 @@ router.post("/:id/rules", mutationLimiter, requireGroupAdmin, requireBouncerPass
   const intervalHours = Math.min(Math.max(parseInt(checkInterval) || 1, 1), 720);
   const intervalSeconds = intervalHours * 3600;
 
-  // min_balance: strict positive integer, capped at int4 max. The form's
-  // min="1" is client-side only; parseInt alone lets "-1" open the gate to
-  // every wallet, quietly weakens "1e5" to 1, and an unbounded value overflows
-  // the int column into the generic 500 page instead of this route's error
-  // banner. Rejecting beats silently rewriting a gate threshold.
-  // (checkNftOwnership also floors its input as the enforcement backstop.)
+  // Strict positive integer, capped at int4 max (the form's min="1" is
+  // client-side only). Reject rather than let parseInt coerce a wrong threshold.
   let minBalanceValue = 1;
   const minBalanceRaw = String(minBalance ?? "").trim();
   if (minBalanceRaw !== "") {
@@ -458,10 +422,8 @@ router.post("/:id/rules/:ruleId/delete", mutationLimiter, requireGroupAdmin, req
     [groupId, user.id, "RULE_REMOVED", JSON.stringify({ ruleId })],
   );
 
-  // If that was the last active rule, release members stuck in PENDING — the
-  // helper no-ops while any rule remains. No cache callback here: the
-  // checked-pairs cache lives in the bot process; its stale 'delete' entries
-  // age out via TTL within the hour.
+  // Release stuck PENDING members if that was the last rule (no-op otherwise).
+  // No cache callback — that cache lives in the bot process, not here.
   const groupRow = await query(`SELECT telegram_id FROM groups WHERE id = $1`, [groupId]);
   if (groupRow.rows.length > 0) {
     await releasePendingMembers(api, groupRow.rows[0].telegram_id);

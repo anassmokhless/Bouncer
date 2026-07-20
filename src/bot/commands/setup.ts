@@ -3,9 +3,8 @@ import { query } from "../../shared/db.js";
 import { getOrCreateGroup, getOrCreateUser, checkBouncerAccess, releasePendingMembers } from "../helpers.js";
 import { collectionExists, tokenExists } from "../../shared/enjin.js";
 import { removeCheckedPair } from "../handlers/existing-member.js";
-//for group admins
 
-//check if user is group admin + holds bouncer pass
+// Group admin who also holds the pass (or open-access).
 async function isAuthorizedAdmin(ctx: Context): Promise<boolean> {
   if (!ctx.chat || !ctx.from) return false;
   if (ctx.chat.type === "private") {
@@ -13,11 +12,8 @@ async function isAuthorizedAdmin(ctx: Context): Promise<boolean> {
     return false;
   }
 
-  // Anonymous admins post as the group itself (sender_chat === chat) and only
-  // admins can do that — accept it as admin proof. Their ctx.from is the
-  // GroupAnonymousBot service account, so the getChatMember path below can't
-  // work for them. Note: syncAdmin/audit entries will then attribute actions
-  // to "GroupAnonymousBot", which is exactly the anonymity the admin chose.
+  // Anonymous admins post as the group itself — that's admin proof, and
+  // getChatMember wouldn't work on their GroupAnonymousBot ctx.from.
   const isAnonymousAdmin = ctx.senderChat?.id === ctx.chat.id;
 
   if (!isAnonymousAdmin) {
@@ -34,18 +30,15 @@ async function isAuthorizedAdmin(ctx: Context): Promise<boolean> {
 
   const access = await checkBouncerAccess(ctx.from.id.toString());
   if (access === null) {
-    // API error — can't confirm the admin has the pass, but shouldn't lock them
-    // out permanently. Tell them to retry; the next command attempt will re-check.
+    // Enjin API error — ask them to retry rather than lock them out.
     await ctx.reply(
       "Couldn't verify your Bouncer Pass right now. Please try again in a moment.",
     );
     return false;
   }
   if (!access) {
-    // The service account can never link a wallet, so in early-access mode an
-    // anonymous admin needs an honest explanation instead of a dead-end
-    // "/verify" suggestion. In open-access mode checkBouncerAccess is always
-    // true and anonymous admins work without restriction.
+    // An anonymous admin has no wallet to link, so give them a real way out
+    // instead of a dead-end "/verify".
     if (isAnonymousAdmin) {
       await ctx.reply(
         "Bouncer can't verify a Bouncer Pass for anonymous admins. Turn off 'Remain Anonymous' and try again, or have a non-anonymous admin run this command.",
@@ -61,7 +54,7 @@ async function isAuthorizedAdmin(ctx: Context): Promise<boolean> {
   return true;
 }
 
-//admin register/update and return
+// Record the caller as a group admin, return their user row.
 async function syncAdmin(ctx: Context, groupId: string) {
   const user = await getOrCreateUser(
     ctx.from!.id.toString(),
@@ -79,7 +72,6 @@ async function syncAdmin(ctx: Context, groupId: string) {
   return user;
 }
 
-//setup all admin commands
 export function registerSetupCommands(bot: Bot) {
   bot.command("setup", async (ctx) => {
     if (!(await isAuthorizedAdmin(ctx))) return;
@@ -107,10 +99,8 @@ export function registerSetupCommands(bot: Bot) {
     if (!(await isAuthorizedAdmin(ctx))) return;
 
     const text = ctx.message?.text || "";
-    // Split on whitespace RUNS, not single spaces: "/addrule 1234  5678" (double
-    // space, common on mobile) would otherwise yield ["1234", "", "5678"] —
-    // shifting the token id into the min_balance slot and silently saving a
-    // rule nobody can pass.
+    // Split on whitespace runs so a double space doesn't produce an empty arg
+    // and shift the token id into the min_balance slot.
     const parts = text.trim().split(/\s+/).slice(1);
 
     if (parts.length < 1) {
@@ -130,13 +120,8 @@ export function registerSetupCommands(bot: Bot) {
     const collectionId = parts[0];
     const tokenId = parts[1] || null;
 
-    // min_balance gets the same strict treatment as the IDs below, because
-    // parseInt alone is dangerous in both directions: "-1" opens the gate to
-    // every wallet, and prefix-parsing quietly WEAKENS it ("1e5" → 1 when the
-    // admin meant 100000). Rejecting beats silently rewriting a gate
-    // threshold. Upper bound = int4 max, matching the column type.
-    // (checkNftOwnership also floors its input, so even a bad stored row can
-    // never open the gate — this check is about honest admin feedback.)
+    // Strict positive integer, capped at int4 max. Reject rather than let
+    // parseInt silently coerce "-1" or "1e5" into a wrong gate threshold.
     let minBalance = 1;
     if (parts[2] !== undefined) {
       const parsed = /^\d+$/.test(parts[2]) ? parseInt(parts[2]) : NaN;
@@ -147,8 +132,7 @@ export function registerSetupCommands(bot: Bot) {
       minBalance = parsed;
     }
 
-    // Enjin collection/token IDs are numeric. Reject non-numeric input early so admins get
-    // clear feedback instead of silently-broken rules that never verify anyone.
+    // Collection/token IDs are numeric.
     if (!/^\d+$/.test(collectionId)) {
       await ctx.reply("Collection ID must be numeric. Example: /addrule 1234 5678 3");
       return;
@@ -158,8 +142,7 @@ export function registerSetupCommands(bot: Bot) {
       return;
     }
 
-    // Verify collection (and token, if specified) actually exist on Enjin. Prevents
-    // admins from saving a typo'd ID that never verifies anyone.
+    // Confirm the collection (and token) exist on Enjin — catches typo'd IDs.
     const collectionOk = await collectionExists(collectionId);
     if (collectionOk === false) {
       await ctx.reply(`Collection ${collectionId} was not found on the Enjin blockchain. Double-check the ID.`);
@@ -183,12 +166,7 @@ export function registerSetupCommands(bot: Bot) {
 
     const chatId = ctx.chat!.id.toString();
 
-    // Wrap DB writes + success reply in try/catch. Without this, any DB error
-    // (transient connectivity blip, constraint violation, etc.) propagates to
-    // grammy's global error handler — which logs but sends nothing back to the
-    // admin. The admin assumes the command succeeded and is confused when /rules
-    // shows no change. Replying with a generic error is safer UX; the real error
-    // is still logged server-side for debugging.
+    // try/catch so a DB error replies to the admin instead of vanishing into bot.catch.
     try {
       const group = await getOrCreateGroup(chatId, ctx.chat!.title || "Unknown");
 
@@ -234,10 +212,6 @@ export function registerSetupCommands(bot: Bot) {
   });
 
   bot.command("rules", async (ctx) => {
-    // Same gate as the other setup commands — /rules was relying only on the
-    // group-command middleware, so a group admin without a Bouncer Pass could
-    // read rule config in early-access mode while every sibling command required
-    // the pass. (In open access checkBouncerAccess is always true, so no change.)
     if (!(await isAuthorizedAdmin(ctx))) return;
 
     const chatId = ctx.chat!.id.toString();
@@ -266,8 +240,7 @@ export function registerSetupCommands(bot: Bot) {
     if (!(await isAuthorizedAdmin(ctx))) return;
 
     const text = ctx.message?.text || "";
-    // Split on whitespace runs so a double space ("/removerule  2", common on
-    // mobile) doesn't yield an empty arg — matches the /addrule parsing.
+    // Whitespace-run split — see /addrule.
     const ruleNumber = parseInt(text.trim().split(/\s+/)[1]);
 
     if (!ruleNumber || ruleNumber < 1) {
@@ -279,9 +252,7 @@ export function registerSetupCommands(bot: Bot) {
 
     const chatId = ctx.chat!.id.toString();
 
-    // Wrap DB reads + writes + reply so any DB failure reaches the admin as a
-    // visible error message instead of silently disappearing into grammy's
-    // global error handler.
+    // try/catch so a DB error replies to the admin instead of vanishing into bot.catch.
     try {
       const result = await query(
         `SELECT r.id, r.collection_id, r.token_id FROM nft_rules r
@@ -324,8 +295,7 @@ export function registerSetupCommands(bot: Bot) {
         ],
       );
 
-      // If that was the last active rule, the group enforces nothing anymore —
-      // release members stuck in PENDING (helper is a no-op while rules remain).
+      // Release stuck PENDING members if that was the last rule (no-op otherwise).
       const releasedCount = await releasePendingMembers(ctx.api, chatId, removeCheckedPair);
 
       const remaining = await query(
@@ -378,8 +348,7 @@ export function registerSetupCommands(bot: Bot) {
     const seconds = Math.round(hours * 3600);
     const chatId = ctx.chat!.id.toString();
 
-    // Wrap DB write + reply so any DB failure reaches the admin as a visible
-    // error instead of silently disappearing into grammy's global error handler.
+    // try/catch so a DB error replies to the admin instead of vanishing into bot.catch.
     try {
       await query(
         `UPDATE nft_rules SET check_interval_seconds = $1

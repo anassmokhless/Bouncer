@@ -1,13 +1,7 @@
 <%- include('partials/head', { title: group.title + ' — Bouncer' }) %>
 <%- include('partials/nav-app', { active: 'groups' }) %>
 
-<%# Helpers voor de sorteerbare members-tabel. sort komt als 'col-dir' (bv.
-    'status-desc'). sortHref berekent de URL voor een kolom-header: als
-    diezelfde kolom al actief is, toggle asc↔desc; anders default op desc.
-    sortArrow geeft het pijltje voor de actieve kolom. paginationHref
-    bouwt de prev/next URLs met sort + search preserved zodat je niet
-    per ongeluk terugvalt op default bij paginatie. Sort wordt NIET
-    gepreserved bij search-submit (aparte keuze — simpeler UX). %>
+<%# Sort/pagination helpers for the members table (sort = 'col-dir'). %>
 <%
   const currSort = typeof sort === 'string' ? sort : 'joined-desc';
   const [sortCol, sortDir] = currSort.split('-');
@@ -92,11 +86,6 @@
       <p class="p-5 text-slate-500 dark:text-gray-500">No rules configured yet.</p>
     <% } else { %>
       <div class="overflow-x-auto">
-        <%# Inline table-layout:fixed + explicit col widths zodat de kolommen
-            exact 1/5 breedte hebben. De add-rule form eronder gebruikt een
-            grid met dezelfde 5 kolommen, zodat inputs perfect onder hun
-            header-labels vallen. Tailwind v4 output bevat geen table-fixed
-            of fractional widths, dus inline styles om een rebuild te vermijden. %>
         <table class="w-full text-sm" style="table-layout: fixed;">
           <thead>
             <tr class="border-b border-slate-200 dark:border-slate-800 text-left">
@@ -128,7 +117,6 @@
       </div>
     <% } %>
 
-    <!-- Add rule form -->
     <div class="px-5 py-4 border-t border-slate-200 dark:border-slate-800">
       <% if (typeof ruleError !== 'undefined' && ruleError) { %>
         <div class="bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-lg p-3 mb-3 flex items-start gap-2">
@@ -138,9 +126,6 @@
           <p class="text-red-700 dark:text-red-400 text-sm"><%= ruleError %></p>
         </div>
       <% } %>
-      <%# Grid met 5 gelijke 1fr kolommen — exact dezelfde verdeling als de
-          tabel-kolommen erboven. De 4 input-velden nemen elk één cel,
-          de Add Rule button de 5e (ter plaatse van de Remove-kolom). %>
       <form action="/dashboard/<%= group.id %>/rules" method="POST"
             style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; align-items: end;">
         <input type="hidden" name="_csrf" value="<%= csrfToken %>">

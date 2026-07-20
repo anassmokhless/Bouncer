@@ -1,13 +1,4 @@
-<%# Dashboard/app nav. Replaces the old partials/nav.ejs. Logo links to "/"
-    so admins can get back to the public landing (prior version linked to
-    /dashboard, which was a dead-end from an admin's perspective). No
-    Contact/Legal here — those belong in the footer. Pass `active`
-    ('groups' | 'audit') to highlight the current section. Requires `user`
-    and `csrfToken` in locals (csrfToken is global via res.locals, user is
-    passed per-route).
-
-    Light/dark: elke color-class heeft een `dark:` pair. De sun/moon toggle
-    button roept __toggleTheme() aan (globaal gedefinieerd in head.ejs). %>
+<%# Dashboard nav. Pass `active` ('groups' | 'audit') to highlight a section. %>
 <% const navActive = typeof active !== 'undefined' ? active : null; %>
 <nav class="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-50 uppercase tracking-wide">
   <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -21,9 +12,6 @@
       <a href="/dashboard/audit"
          class="text-sm <%= navActive === 'audit' ? 'text-cyan-600 dark:text-cyan-400' : 'text-slate-600 dark:text-gray-400 hover:text-cyan-600 dark:hover:text-cyan-400' %> transition-colors">Audit Logs</a>
 
-      <%# Theme toggle — sun zichtbaar in dark mode (klik = naar light),
-          moon zichtbaar in light mode (klik = naar dark). type="button"
-          nodig zodat 'ie niet per ongeluk de sign-out form submit. %>
       <button type="button" data-theme-toggle
               class="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
               aria-label="Toggle theme">

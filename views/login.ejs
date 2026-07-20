@@ -6,17 +6,6 @@
     <h1 class="text-2xl font-bold text-cyan-600 dark:text-cyan-400 mb-2">Bouncer</h1>
     <p class="text-sm text-slate-600 dark:text-gray-400 mb-6">Sign in with your Telegram account to manage your groups.</p>
 
-    <!-- Telegram Login Widget — data-onauth (JS callback via postMessage) instead
-         of data-auth-url (popup → redirect). data-auth-url was less reliable:
-         Telegram's popup sometimes closed before the redirect landed, causing
-         nginx 499s. data-onauth hands us the auth blob directly in the parent
-         window; we POST it (below) rather than putting it in a URL, so the
-         signed blob never leaks into nginx logs, browser history, or Referer.
-
-         The widget doesn't follow our theme class — it auto-detects via
-         prefers-color-scheme. On a mismatch between the user toggle and the OS
-         preference it can look light or dark independent of our page. There's
-         no Telegram API to force it; accepted. -->
     <div class="flex justify-center mb-4">
       <script async src="https://telegram.org/js/telegram-widget.js?22"
               data-telegram-login="<%= botUsername %>"

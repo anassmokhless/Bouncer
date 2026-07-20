@@ -20,9 +20,8 @@ router.get("/", readLimiter, async (req: Request, res: Response) => {
     WHERE u2.telegram_id = $1
   )`;
 
-  // ILIKE op wallet_address werkt ook met NULL (geeft NULL → falsy), dus
-  // audit entries van verwijderde users of RULE_ADDED/RULE_REMOVED entries
-  // (zonder user_id) matchen simpelweg niet op wallet-zoektermen.
+  // ILIKE on a NULL wallet_address is NULL (falsy), so entries without a user
+  // (deleted users, RULE_ADDED/REMOVED) simply don't match wallet searches.
   const searchFilter = search
     ? ` AND (u.username ILIKE $2 OR u.first_name ILIKE $2 OR u.wallet_address ILIKE $2)`
     : "";

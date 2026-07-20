@@ -1,11 +1,4 @@
-<%# Public-site nav. Used by landing, contact, legal. Sticky + backdrop-blur
-    because marketing pages are long-scroll; always-visible nav helps re-entry.
-    Logo always links to "/". Pass `active` ('contact' | 'legal') to highlight
-    a section. "Admin Portal" is a CTA button, not a neutral link — it's the
-    primary conversion on public pages.
-
-    Light/dark: elke color-class heeft een `dark:` pair. De sun/moon toggle
-    button roept __toggleTheme() aan (globaal gedefinieerd in head.ejs). %>
+<%# Public-site nav. Pass `active` ('contact' | 'legal') to highlight a section. %>
 <% const navActive = typeof active !== 'undefined' ? active : null; %>
 <nav class="bg-white/80 dark:bg-slate-900/80 border-b border-slate-200 dark:border-slate-800 backdrop-blur-sm sticky top-0 z-50 uppercase tracking-wide">
   <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -19,8 +12,6 @@
       <a href="/legal"
          class="text-sm <%= navActive === 'legal' ? 'text-cyan-600 dark:text-cyan-400' : 'text-slate-600 dark:text-gray-400 hover:text-cyan-600 dark:hover:text-cyan-400' %> transition-colors">Legal</a>
 
-      <%# Theme toggle — zelfde pattern als in nav-app. Sun zichtbaar in dark,
-          moon zichtbaar in light. type="button" zodat 'ie geen form submit. %>
       <button type="button" data-theme-toggle
               class="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
               aria-label="Toggle theme">

@@ -2,13 +2,11 @@ import { Api, API_CONSTANTS, GrammyError } from "grammy";
 import { query } from "../shared/db.js";
 import { hasBouncerPass } from "../shared/enjin.js";
 
-// Telegram's service account that fronts for anonymous admins. Updates whose
-// actor is this id were performed by SOME anonymous admin of that chat —
-// Telegram only substitutes it for genuine admins, so it doubles as admin
-// proof in update types that lack sender_chat (e.g. my_chat_member).
+// Telegram's service account for anonymous admins. Only genuine admins get
+// substituted with it, so it doubles as admin proof where sender_chat is absent.
 export const GROUP_ANONYMOUS_BOT_ID = 1087968824;
 
-// Full "muted" permission set — no sending, no admin-lite actions.
+// Everything off: full mute.
 const MUTE_PERMISSIONS = {
   can_send_messages: false,
   can_send_audios: false,
@@ -26,15 +24,11 @@ const MUTE_PERMISSIONS = {
   can_manage_topics: false,
 };
 
-// Chats we've confirmed are basic groups (not supergroups). Telegram's
-// restrictChatMember only works in supergroups, so after the first 400 we
-// remember the chat and silent-skip future mute/unmute attempts. Resets on
-// process restart — worst case is one extra warn line per chat per boot.
-// Cleared automatically when a chat upgrades (new migrate_to_chat_id means
-// a new chatId that isn't in the set).
+// Basic groups (not supergroups) where restrictChatMember returns 400. Cached
+// so we skip further mute/unmute attempts; resets on restart.
 const basicGroups = new Set<string>();
 
-/** Detect the specific "only for supergroups" 400 so we can silent-skip it. */
+// Telegram's "only for supergroups" 400.
 function isBasicGroupError(err: unknown): boolean {
   return (
     err instanceof GrammyError &&
@@ -44,12 +38,7 @@ function isBasicGroupError(err: unknown): boolean {
   );
 }
 
-/**
- * Detect Telegram's 400 USER_NOT_PARTICIPANT — the user already left the
- * chat, so a kick can never succeed. Callers should reconcile the DB
- * (status → LEFT) instead of retrying forever (see GUIDE 8.11: on metered
- * infra a permanently-failing retry loop burns real compute).
- */
+// Telegram's 400 for a user who has already left the chat.
 export function isUserNotParticipantError(err: unknown): boolean {
   return (
     err instanceof GrammyError &&
@@ -59,12 +48,8 @@ export function isUserNotParticipantError(err: unknown): boolean {
   );
 }
 
-/**
- * Apply mute permissions to a user. Returns true if Telegram accepted the
- * call, false if the chat is a basic group (silent-skip) or another handled
- * condition. Real errors (permission denied, network, etc.) are logged but
- * still return false so callers can fall back to delete-on-send.
- */
+// Mute a user. Returns false (never throws) on basic groups or any error, so
+// callers can fall back to delete-on-send.
 export async function safeMute(
   api: Api,
   chatId: number | string,
@@ -90,11 +75,7 @@ export async function safeMute(
   }
 }
 
-/**
- * Remove mute permissions from a user. Same error-handling semantics as
- * safeMute — basic groups are silent-skipped (we don't double-log the
- * "not a supergroup" warning since it was already surfaced on mute).
- */
+// Unmute a user. Same false-on-error contract as safeMute.
 export async function safeUnmute(
   api: Api,
   chatId: number | string,
@@ -104,14 +85,9 @@ export async function safeUnmute(
   if (basicGroups.has(chatKey)) return false;
 
   try {
-    // All-true is the Bot API's documented "lift restrictions" payload: the
-    // member returns to plain-member status and follows the group's live
-    // default permissions from then on (Telegram caps effective rights at
-    // those defaults, so this can never grant more than an ordinary member).
-    // Do NOT replay chat.permissions here instead — any false field in that
-    // snapshot keeps the user "restricted" forever, pinned to the defaults as
-    // they happened to be at unmute time (e.g. a temporary group lockdown
-    // would leave a member who verified during it muted permanently).
+    // All-true is the API's "lift restrictions" call: the member drops back to
+    // plain-member and follows the group's live defaults. Don't replay
+    // chat.permissions — a false field there would pin them muted forever.
     await api.restrictChatMember(Number(chatId), Number(userId), API_CONSTANTS.ALL_CHAT_PERMISSIONS);
     return true;
   } catch (err) {
@@ -124,21 +100,8 @@ export async function safeUnmute(
   }
 }
 
-/**
- * Release every PENDING member of a group that no longer has active rules:
- * status back to VERIFIED, deadline cleared, best-effort unmute. Called after
- * a rule removal — with nothing left to verify against, keeping members
- * PENDING would strand them (the verify-poll skips rule-less groups) even
- * though the kick cron's rules-guard prevents the actual kick.
- *
- * Self-guarding: the NOT EXISTS makes this a no-op while the group still has
- * any active rule, so call sites invoke it unconditionally after deactivating.
- * No audit entries — nobody verified anything; this is state reconciliation.
- *
- * `onReleased` lets the bot process clear its in-memory checked-pairs cache
- * (the dashboard can't — that cache lives in the bot container; its 'delete'
- * entries age out via TTL within the hour).
- */
+// Flip every PENDING member of a now rule-less group back to VERIFIED and unmute.
+// No-op while any rule is still active. onReleased fires per released member.
 export async function releasePendingMembers(
   api: Api,
   groupTelegramId: string,
@@ -164,13 +127,8 @@ export async function releasePendingMembers(
   return released.rows.length;
 }
 
-// Escape characters that have special meaning in Telegram's HTML parse mode.
-// Only `<`, `>`, `&` need escaping — the HTML parse mode is far more forgiving
-// than Markdown v1, which requires escaping `_`, `*`, `[`, `]`, `(`, `)`, `` ` ``.
-// Use this on any user-provided string (first_name, username) injected into a
-// message sent with `parse_mode: "HTML"`. Real production incident: a user
-// named "Cryptan_19" joined and the `_` broke Markdown parsing mid-message,
-// rejecting the entire welcome message with a 400 from Telegram.
+// Escape <, >, & for messages sent with parse_mode: "HTML". Use on any user
+// string (first_name, username).
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -199,13 +157,9 @@ export async function getOrCreateUser(telegramId: string,username?: string,first
   return result.rows[0];
 }
 
-//check if a user holds the bouncer pass by telegram id
-// Inherits the tri-state semantics of hasBouncerPass:
-//   true  — user has linked a wallet that holds the pass
-//   false — user has no wallet, or wallet definitively lacks the pass
-//   null  — couldn't determine right now (Enjin API error). Callers must NOT
-//           treat null as false for destructive decisions (leaving groups,
-//           refusing commands with no retry path, etc.).
+// Tri-state (from hasBouncerPass): true = holds the pass, false = no wallet or
+// lacks it, null = Enjin API error. Callers must not treat null as false for
+// destructive decisions (leaving groups, refusing commands).
 export async function checkBouncerAccess(telegramId: string): Promise<boolean | null> {
   if (!process.env.BOUNCER_COLLECTION_ID) return true; // early access disabled
 

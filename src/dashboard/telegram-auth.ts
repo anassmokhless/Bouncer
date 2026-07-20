@@ -4,11 +4,8 @@ import { query } from "../shared/db.js";
 interface TelegramLoginData {
   id: string;
   first_name?: string;
-  // Telegram's Login Widget includes last_name in the signed payload whenever
-  // the user has one set on their profile. We MUST forward it into the HMAC
-  // check-string even though we never persist it — otherwise users with a last
-  // name get "Invalid Telegram login" on every attempt. verifyTelegramLogin
-  // filters out undefined keys, so users without a last name are unaffected.
+  // Part of the signed payload (when present), so it must go into the HMAC
+  // check-string even though we never store it.
   last_name?: string;
   username?: string;
   photo_url?: string;
@@ -19,7 +16,7 @@ interface TelegramLoginData {
 export function verifyTelegramLogin(data: TelegramLoginData): boolean {
   const { hash, ...rest } = data;
 
-  // Validate hash format (SHA-256 HMAC is exactly 64 hex characters)
+  // HMAC-SHA256 is 64 hex chars.
   if (!hash || !/^[0-9a-f]{64}$/i.test(hash)) return false;
 
   const secret = crypto
@@ -40,11 +37,7 @@ export function verifyTelegramLogin(data: TelegramLoginData): boolean {
 
   if (!crypto.timingSafeEqual(Buffer.from(hmac, "hex"), Buffer.from(hash, "hex"))) return false;
 
-  // Freshness window: reject blobs older than 5 minutes. Telegram fires the
-  // login callback within seconds of the user authorizing, so 5 min is a
-  // comfortable margin for clock skew while shrinking the replay window from a
-  // full day. The blob still travels in the callback query string today, so a
-  // short window is the main defense until that moves to a POST body.
+  // Reject blobs older than 5 min to bound replay (needs a synced server clock).
   const authDate = parseInt(data.auth_date);
   if (!Number.isFinite(authDate) || Date.now() / 1000 - authDate > 300) return false;
 

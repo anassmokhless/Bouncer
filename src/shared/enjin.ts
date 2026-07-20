@@ -88,13 +88,8 @@ export async function getVerifiedWallet(
   }
 }
 
-// Detect Enjin's "not found" response shape. The Enjin Platform returns a 400
-// validation error (category: "validation", extensions.validation.<field>: [...])
-// when an ID doesn't exist on-chain — NOT a null result. The graphql-request
-// client throws a ClientError for any non-2xx, so the catch block below has to
-// discriminate "user typo'd the ID" from "actual API outage" by inspecting the
-// error shape. Any validation-category error means the input refers to something
-// that doesn't exist on-chain; anything else is a real error.
+// Enjin returns a "validation"-category 400 for an ID that doesn't exist
+// on-chain. This distinguishes that (a typo'd ID) from a real API outage.
 function isEnjinValidationError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const e = err as {
@@ -105,12 +100,7 @@ function isEnjinValidationError(err: unknown): boolean {
   return errors.some((ge) => ge?.extensions?.category === "validation");
 }
 
-// Verify an Enjin collection exists. Returns:
-//   true  — collection found on-chain
-//   false — collection does not exist (or ID is rejected by Enjin's validator)
-//   null  — real API error (network, auth, 5xx, schema mismatch, etc.)
-// Called from /addrule paths (bot + dashboard) before inserting a rule so admins
-// can't accidentally save a collection ID that will never verify anyone.
+// Does the collection exist on-chain? true / false / null (API error).
 export async function collectionExists(collectionId: string): Promise<boolean | null> {
   const q = gql`
     query GetCollection($collectionId: BigInt!) {
@@ -131,17 +121,12 @@ export async function collectionExists(collectionId: string): Promise<boolean | 
   }
 }
 
-// Verify a specific token exists in a collection. Same return semantics as
-// collectionExists. Only called when the admin supplies a token_id; rules
-// that accept "any token in the collection" skip this check.
+// Does the token exist in the collection? Same tri-state as collectionExists.
 export async function tokenExists(
   collectionId: string,
   tokenId: string,
 ): Promise<boolean | null> {
-  // Enjin's Token.tokenId output field is a BigInt scalar — sub-selection
-  // (e.g. `tokenId { integer }`) throws a schema error. The INPUT type
-  // EncodableTokenIdInput still accepts `{integer: ...}` — only the output
-  // is scalar. Asking for just `tokenId` is enough to confirm existence.
+  // Token.tokenId is a scalar output — select it directly (no sub-selection).
   const q = gql`
     query GetToken($collectionId: BigInt!, $tokenId: EncodableTokenIdInput!) {
       GetToken(collectionId: $collectionId, tokenId: $tokenId) {
@@ -161,14 +146,8 @@ export async function tokenExists(
   }
 }
 
-//bouncer pass check (early access)
-// Returns:
-//   true  — wallet holds the pass
-//   false — wallet definitively doesn't hold the pass (clean API result)
-//   null  — couldn't determine (API error). Callers must treat null conservatively:
-//           never make a destructive decision (leaving a group, kicking an admin)
-//           on a null result — retry on the next cycle instead. Mirrors the
-//           semantics of checkNftOwnership used by the member-gating flow.
+// Does the wallet hold the Bouncer Pass? true / false / null (API error — never
+// act destructively on null).
 export async function hasBouncerPass(walletAddress: string): Promise<boolean | null> {
   const collectionId = process.env.BOUNCER_COLLECTION_ID;
   if (!collectionId) return true; // no collection set = early access disabled
@@ -177,32 +156,22 @@ export async function hasBouncerPass(walletAddress: string): Promise<boolean | n
   return checkNftOwnership(walletAddress, collectionId, tokenId, 1);
 }
 
-//ntf ownership verification — returns null on API error (skip, don't kick)
+// NFT ownership check — true / false / null (API error: skip, don't kick).
 export async function checkNftOwnership(
   walletAddress: string,
   collectionId: string,
   tokenId: string | null,
   minBalance: number = 1,
 ): Promise<boolean | null> {
-  // Enforcement floor for the gate threshold. A min_balance < 1 makes every
-  // `balance >= minBalance` comparison below true for every wallet — the gate
-  // silently opens to anyone. The write paths validate their input, but this
-  // is the single point every rule consumer passes through, so it also
-  // neutralizes bad rows already in the database and any future writer.
+  // Floor the threshold: a min_balance < 1 would pass every wallet. This is the
+  // single point every consumer hits, so it also neutralizes bad stored rows.
   minBalance = Math.max(1, minBalance);
 
   try {
     if (tokenId) {
-      // Specific token: filter by BOTH collectionId and tokenId server-side, so
-      // the API returns at most the single tokenAccount for this wallet+token.
-      // Verified against the live schema: a token the wallet doesn't hold yields
-      // empty edges (ownership-scoped), a held one returns its balance. No
-      // pagination — a wallet holds at most one account per token, so `first: 1`
-      // is exact no matter how many tokens the wallet holds. (The old version
-      // paged the whole collection hunting for the token and gave up with `null`
-      // past ~5000 tokens, so a whale/marketplace wallet could never verify.)
-      // Note tokenIds is `[BigInt]`, NOT the EncodableTokenIdInput type the input
-      // mutations use.
+      // Filter by collectionId AND tokenId server-side: the wallet holds at most
+      // one account per token, so first:1 is exact and no pagination is needed.
+      // Empty edges = not held. (tokenIds is [BigInt], not EncodableTokenIdInput.)
       const q = gql`
         query GetWallet($address: String!, $collectionIds: [BigInt!], $tokenIds: [BigInt]) {
           GetWallet(account: $address) {
@@ -236,15 +205,14 @@ export async function checkNftOwnership(
 
       if (!data.GetWallet) return false;
 
-      // The server already scopes to this token; the equality check is a
-      // defensive guard before trusting the balance.
+      // Defensive: the server already scopes to this token.
       const edge = data.GetWallet.tokenAccounts.edges.find(
         (e) => e.node.token.tokenId === tokenId,
       );
       if (!edge) return false; // wallet doesn't hold this token
       return parseInt(edge.node.balance) >= minBalance;
     } else {
-      // Any token in collection: sum all balances with pagination
+      // Any token in the collection: sum balances across pages.
       const q = gql`
         query GetWallet($address: String!, $collectionIds: [BigInt!], $after: String) {
           GetWallet(account: $address) {
@@ -263,14 +231,9 @@ export async function checkNftOwnership(
         }
       `;
 
-      // Hard page cap prevents runaway pagination on pathological wallets (e.g. an
-      // attacker who minted many tokens in the target collection and transferred them
-      // out, leaving thousands of zero-balance tokenAccount records). Without the cap,
-      // one bad wallet in a recheck batch can stall the entire cron for minutes via
-      // Promise.all. 50 pages × 100 tokens = 5000 token accounts — far above any
-      // realistic legitimate holder. If the cap is hit without meeting the threshold,
-      // return null (same semantic as any other API error: skip this rule this cycle,
-      // don't make a false-negative decision).
+      // Cap pagination against pathological wallets (thousands of zero-balance
+      // token accounts). 5000 accounts is far above any real holder; hitting the
+      // cap returns null (inconclusive), like any other API error.
       const MAX_PAGES = 50;
       let pageCount = 0;
       let totalBalance = 0;
@@ -290,8 +253,7 @@ export async function checkNftOwnership(
           totalBalance += parseInt(edge.node.balance);
         }
 
-        // Early exit if threshold already met
-        if (totalBalance >= minBalance) return true;
+        if (totalBalance >= minBalance) return true; // early exit
 
         hasNextPage = data.GetWallet.tokenAccounts.pageInfo?.hasNextPage ?? false;
         afterCursor = data.GetWallet.tokenAccounts.pageInfo?.endCursor ?? null;
@@ -299,7 +261,7 @@ export async function checkNftOwnership(
       }
 
       if (hasNextPage) {
-        // Cap hit with more pages remaining and threshold not met — can't fairly decide.
+        // Cap hit without meeting the threshold — inconclusive.
         console.warn(`[ENJIN] Pagination cap (${MAX_PAGES} pages) hit for ${walletAddress} in collection ${collectionId} (minBalance=${minBalance}, summed=${totalBalance}) — returning null`);
         return null;
       }

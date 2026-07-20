@@ -3,35 +3,22 @@ import { query } from "../../shared/db.js";
 import { checkNftOwnership } from "../../shared/enjin.js";
 import { getOrCreateUser, safeMute, escapeHtml } from "../helpers.js";
 
-// Per-entry cache with TWO modes:
-//   - 'skip'   → user is verified / admin / in a group without rules. Skip the full flow.
-//   - 'delete' → user is PENDING. Delete every message they send until the entry expires
-//                or is cleared (e.g., on successful verification). Supports basic groups
-//                where Telegram's mute API doesn't work.
-//
-// Different TTLs per scenario: successful check → 1 hour, admin → 5 min (so demotions
-// take effect quickly), API error → 30 sec backoff (prevent 429 cascades), pending →
-// 1 hour (cleared early by cron.ts when user verifies via QR).
-const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour — normal TTL after a successful check or on pending path
-const ADMIN_TTL_MS = 5 * 60 * 1000;  // 5 minutes — shorter TTL for admin status so demotions take effect quickly
-const ERROR_BACKOFF_MS = 30 * 1000;  // 30 seconds — short backoff after an API error
+// Per-(chat,user) cache. 'skip' = verified/admin/rule-less group, skip the flow;
+// 'delete' = PENDING, delete their messages (covers basic groups where mute fails).
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1h — after a check, or on the pending path
+const ADMIN_TTL_MS = 5 * 60 * 1000;  // 5m — short so demotions take effect quickly
+const ERROR_BACKOFF_MS = 30 * 1000;  // 30s — backoff after an API error
 
 type CacheEntry = { validUntil: number; mode: "skip" | "delete" };
 
-// Hard size cap protects against memory amplification in raid-style attacks where
-// attackers flood a gated group with many unique (chatId, userId) pairs faster than
-// the hourly prune can reclaim expired entries. Without this, a SIM-farm raid could
-// push the Map into hundreds of MB before the next prune runs. At ~140 bytes/entry,
-// 50K caps memory at ~7MB. Eviction is FIFO (oldest insertion first) since Map
-// preserves insertion order; an evicted legitimate user just re-checks on their next
-// message (2 DB queries + 1 Telegram API call — not free but not harmful).
+// Cap so a raid flooding unique (chatId, userId) pairs can't balloon the Map
+// before the hourly prune (~7MB at 50K). FIFO eviction; an evicted user re-checks.
 const MAX_CACHE_SIZE = 50_000;
 const checkedPairs = new Map<string, CacheEntry>();
 
-/** Set a cache entry, enforcing the size cap via FIFO eviction when full */
+// Set a cache entry; FIFO-evict the oldest when at the cap.
 function setChecked(key: string, validUntil: number, mode: "skip" | "delete" = "skip") {
-  // Only evict if we're at the cap AND this is a brand-new key — if key already
-  // exists, .set() updates in place without growing the Map.
+  // An existing key updates in place; only a new key at the cap needs eviction.
   if (checkedPairs.size >= MAX_CACHE_SIZE && !checkedPairs.has(key)) {
     const oldest = checkedPairs.keys().next().value;
     if (oldest !== undefined) checkedPairs.delete(oldest);
@@ -39,12 +26,12 @@ function setChecked(key: string, validUntil: number, mode: "skip" | "delete" = "
   checkedPairs.set(key, { validUntil, mode });
 }
 
-/** Remove a specific pair so the user gets re-checked on next message */
+// Remove a pair so the user re-checks on their next message.
 export function removeCheckedPair(chatId: string, userId: string) {
   checkedPairs.delete(`${chatId}:${userId}`);
 }
 
-/** Prune all expired entries from the cache */
+// Drop expired entries.
 export function pruneCheckedPairs() {
   const now = Date.now();
   for (const [key, entry] of checkedPairs) {
@@ -60,10 +47,7 @@ export async function handleExistingMember(ctx: Context) {
   const userId = ctx.from.id.toString();
   const key = `${chatId}:${userId}`;
 
-  // Cache fast-path. Two modes:
-  //   'skip'   → user was recently verified / admin / in a rule-less group → return
-  //   'delete' → user is known-PENDING → delete this message and return (no DB/API work)
-  // Entries are cleared by cron.ts when a user verifies via QR so their next message goes through.
+  // Cache fast-path: 'skip' returns, 'delete' deletes the message and returns.
   const cached = checkedPairs.get(key);
   if (cached && Date.now() < cached.validUntil) {
     if (cached.mode === "delete") {
@@ -85,10 +69,9 @@ export async function handleExistingMember(ctx: Context) {
     [chatId],
   );
 
-  if (groupResult.rows.length === 0) { setChecked(key, Date.now() + CACHE_TTL_MS); return; } // No rules — skip
+  if (groupResult.rows.length === 0) { setChecked(key, Date.now() + CACHE_TTL_MS); return; } // no rules — skip
   const groupId = groupResult.rows[0].id;
 
-  // Check if user is already tracked as VERIFIED
   const memberResult = await query(
     `SELECT m.status FROM members m
      JOIN users u ON u.id = m.user_id
@@ -98,23 +81,20 @@ export async function handleExistingMember(ctx: Context) {
 
   if (memberResult.rows.length > 0 && memberResult.rows[0].status === "VERIFIED") { setChecked(key, Date.now() + CACHE_TTL_MS); return; }
 
-  // User is not verified — check if they're an admin (don't restrict admins)
+  // Not verified — don't restrict admins.
   try {
     const chatMember = await ctx.api.getChatMember(ctx.chat.id, ctx.from.id);
     if (chatMember.status === "administrator" || chatMember.status === "creator") { setChecked(key, Date.now() + ADMIN_TTL_MS); return; }
   } catch (err) {
     console.error("[BOT] Failed to check admin status:", err);
-    // Short backoff so spamming messages during a Telegram API blip don't each trigger
-    // another getChatMember call (429 cascade protection). 30s is short enough that an
-    // admin briefly mis-classified during the blip is re-checked quickly after recovery.
+    // Short backoff so message spam during an API blip doesn't fire a getChatMember each.
     setChecked(key, Date.now() + ERROR_BACKOFF_MS);
     return;
   }
 
-  // Get or create user record
   const user = await getOrCreateUser(userId, ctx.from.username, ctx.from.first_name);
 
-  // If user has a wallet, try auto-verify
+  // Try auto-verify against the group's rules.
   if (user.wallet_address) {
     const rules = await query(
       `SELECT * FROM nft_rules WHERE group_id = $1 AND is_active = true`,
@@ -146,15 +126,12 @@ export async function handleExistingMember(ctx: Context) {
           [groupId, user.id, "USER_AUTO_VERIFIED", JSON.stringify({ collectionId: rule.collection_id })],
         );
 
-        setChecked(key, Date.now() + CACHE_TTL_MS); return; // Verified — don't restrict
+        setChecked(key, Date.now() + CACHE_TTL_MS); return; // verified — don't restrict
       }
     }
 
-    // If every rule check errored, we can't fairly evaluate this user — skip without
-    // deleting or restricting. Short backoff so subsequent messages during the outage
-    // don't each re-trigger the full Enjin API check. Once the API recovers, the
-    // recheck cron or the user's next message (after backoff expires) will restrict
-    // them if they truly don't hold the required NFTs.
+    // Every rule check errored — can't decide, so skip with a backoff instead of
+    // restricting. The recheck cron or their next message re-evaluates once Enjin recovers.
     if (rules.rows.length > 0 && !gotCleanApiResult) {
       console.log(`[BOT] Skipped existing member ${userId} in ${chatId} — Enjin API errored on all rules`);
       setChecked(key, Date.now() + ERROR_BACKOFF_MS);
@@ -162,10 +139,8 @@ export async function handleExistingMember(ctx: Context) {
     }
   }
 
-  // Not verified. Two-pronged defense:
-  //   1. Delete the current message immediately (works in basic groups AND supergroups).
-  //   2. Attempt to mute so future messages never arrive (works in supergroups; no-ops in
-  //      basic groups — safeMute detects this and silent-skips after the first 400).
+  // Not verified: delete this message (works everywhere) and mute future ones
+  // (no-op in basic groups).
   try {
     await ctx.deleteMessage();
   } catch (err) {
@@ -174,9 +149,8 @@ export async function handleExistingMember(ctx: Context) {
 
   await safeMute(ctx.api, ctx.chat.id, ctx.from.id);
 
-  // Set as pending with 24-hour deadline for existing members. Only set a new deadline
-  // when transitioning INTO pending — if they're already pending, preserve their
-  // existing deadline so a persistent spammer can't avoid the kick by sending messages.
+  // PENDING with a 24h deadline. Preserve an existing pending deadline so a
+  // spammer can't reset it by sending messages.
   const upsert = await query(
     `INSERT INTO members (group_id, user_id, status, verification_deadline)
      VALUES ($1, $2, 'PENDING', now() + interval '24 hours')
@@ -191,15 +165,9 @@ export async function handleExistingMember(ctx: Context) {
     [groupId, user.id],
   );
 
-  // Prompt on every full-flow pass, not only on the VERIFIED→PENDING transition.
-  // A full flow runs at most ~once per cache TTL (1h) per user, so this can't
-  // spam — and it covers members who became PENDING outside this handler
-  // (wallet unlink, the wallet-less re-gate sweep), who previously had their
-  // messages deleted without ever being told why. The hours in the text come
-  // from the actual row deadline, so shorter windows (the 1h unlink deadline)
-  // are reported truthfully instead of a hardcoded "24 hours".
-  // HTML parse mode (not Markdown v1) — see new-member.ts for the rationale:
-  // first_name can contain `_` / `*` / etc. which break Markdown v1 mid-message.
+  // Prompt on every full-flow pass (throttled to ~once per cache TTL), so members
+  // who became PENDING elsewhere (unlink, re-gate sweep) also get told why. Hours
+  // come from the actual deadline, so a 1h window isn't reported as 24h.
   const deadline: Date | null = upsert.rows[0]?.verification_deadline ?? null;
   const hoursLeft = deadline ? Math.max(1, Math.ceil((deadline.getTime() - Date.now()) / 3600000)) : 24;
   try {
@@ -217,9 +185,7 @@ export async function handleExistingMember(ctx: Context) {
     console.error("[BOT] Failed to send verification prompt:", err);
   }
 
-  // Cache in 'delete' mode so subsequent messages from this user are deleted
-  // immediately without re-running the full check flow. Cleared by cron.ts on
-  // successful verification so their next message goes through cleanly.
+  // 'delete' mode; cleared by cron.ts on successful verification.
   setChecked(key, Date.now() + CACHE_TTL_MS, "delete");
   console.log(`[BOT] Existing member ${userId} pending verification in ${chatId} — message deleted`);
 }

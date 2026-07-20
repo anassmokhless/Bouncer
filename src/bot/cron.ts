@@ -11,12 +11,9 @@ let isKicking = false;
 let isLeaving = false;
 let isAdminRechecking = false;
 
-// Cross-process coordination via PostgreSQL advisory locks.
-// The in-memory flags above prevent overlapping runs within a single Node process.
-// These lock IDs prevent overlapping runs across multiple bot instances (e.g. during
-// rolling deploys, accidental double-start, or HA setups). Each cron gets a unique
-// stable integer; pg_try_advisory_lock is non-blocking so unavailable locks are a
-// no-op skip (same semantics as the in-memory flag).
+// Advisory-lock ids so crons don't overlap across bot instances (the in-memory
+// flags above only cover a single process). pg_try_advisory_lock is non-blocking,
+// so an unavailable lock just skips the tick.
 const LOCK_ID_POLL = 1001;
 const LOCK_ID_RECHECK = 1002;
 const LOCK_ID_KICK = 1003;
@@ -28,22 +25,15 @@ async function withAdvisoryLock(lockId: number, fn: () => Promise<void>): Promis
   try {
     const result = await client.query(`SELECT pg_try_advisory_lock($1) AS locked`, [lockId]);
     if (!result.rows[0].locked) {
-      // Another instance holds it — skip this tick. Logged as a warning because
-      // in a single-instance deployment this should essentially never happen; if
-      // it does, it usually signals a connection-pooler quirk (see pg_advisory
-      // lock + pooler interactions) or a stuck lock from a prior session, not
-      // a legitimate "another bot is doing work" scenario.
+      // Warn, not info: in a single-instance deployment this should never happen
+      // (usually a stuck lock or a pooler quirk, not another bot doing work).
       console.warn(`[CRON] Advisory lock ${lockId} unavailable — skipping tick`);
       return;
     }
     try {
       await fn();
     } finally {
-      // Best-effort release. If this fails the lock stays held on this pooled connection
-      // until the process exits (TCP disconnect releases session-scoped locks). That's
-      // acceptable degradation — the work still ran, and the next tick will either reuse
-      // this connection (reentrant try_lock returns true — work runs as normal) or get a
-      // different connection.
+      // Best-effort release; a stuck lock frees itself when the connection drops.
       try {
         await client.query(`SELECT pg_advisory_unlock($1)`, [lockId]);
       } catch (unlockErr) {
@@ -56,7 +46,7 @@ async function withAdvisoryLock(lockId: number, fn: () => Promise<void>): Promis
 }
 
 export function startCronJobs(bot: Bot) {
-  // Poll pending QR verifications every 15 seconds
+  // Poll pending QR verifications every 15s.
   cron.schedule("*/15 * * * * *", async () => {
     if (isPolling) return;
     isPolling = true;
@@ -82,16 +72,13 @@ export function startCronJobs(bot: Bot) {
     }
   });
 
-  // Every minute — matches the shortest verification deadline (5 min for new joiners),
-  // so users get kicked within ~1 min of their deadline instead of waiting up to an hour.
-  // Cheap: the filtering SELECT is indexed and typically returns 0 rows.
+  // Kick past-deadline members every minute.
   cron.schedule("* * * * *", async () => {
     if (isKicking) return;
     isKicking = true;
     console.log("[CRON] kick-expired tick");
     try {
       await withAdvisoryLock(LOCK_ID_KICK, async () => {
-        // Prune expired entries from existing-member TTL cache
         pruneCheckedPairs();
         await kickExpiredPendingMembers(bot);
       });
@@ -102,7 +89,7 @@ export function startCronJobs(bot: Bot) {
     }
   });
 
-  // Check for groups where admin didn't verify in time — every minute
+  // Leave groups whose admin-verify deadline expired — every minute.
   cron.schedule("* * * * *", async () => {
     if (isLeaving) return;
     isLeaving = true;
@@ -116,11 +103,9 @@ export function startCronJobs(bot: Bot) {
     }
   });
 
-  // Periodic admin Pass-ownership sweep — every 5 minutes. Catches admins who
-  // transferred/sold their Bouncer Pass without running /unlink. Arms the 5-min
-  // admin_verify_deadline on groups where NO admin currently holds the pass;
-  // leaveUnverifiedGroups (the */1min cron above) does the actual kick once the
-  // deadline fires, giving admins a grace window to re-acquire the pass.
+  // Every 5 min, arm the leave-deadline on groups where no admin holds the pass
+  // anymore (catches a pass sold/transferred without /unlink). The */1min cron
+  // above does the actual leave once the deadline fires.
   cron.schedule("*/5 * * * *", async () => {
     if (isAdminRechecking) return;
     isAdminRechecking = true;
@@ -156,31 +141,25 @@ async function pollPendingVerifications(bot: Bot) {
     const walletAddress = await getVerifiedWallet(row.verification_id);
     if (!walletAddress) continue;
 
-    // Check wallet isn't already claimed
+    // Reject a wallet already linked to another account.
     const existing = await query(
       `SELECT id FROM users WHERE wallet_address = $1 AND id != $2`,
       [walletAddress, row.user_id],
     );
 
     if (existing.rows.length > 0) {
-      // Wrap sendMessage so a delivery failure (user blocked bot, chat deleted, Telegram
-      // rate limit) doesn't abort this cron tick and leave the pending row stranded for
-      // up to 10 min until the expires_at sweep. Without this, the exception propagates
-      // out of the loop and blocks processing of every other pending row in this batch.
       try {
         await bot.api.sendMessage(parseInt(row.telegram_chat_id),
           "This wallet is already linked to another Telegram account. Please use a different wallet.");
       } catch (err) {
         console.error(`[CRON] Failed to notify ${row.user_telegram_id} of duplicate wallet:`, err);
       }
-      // Always delete the pending row — retrying notification won't help (the wallet is
-      // still claimed by someone else), and keeping the row alive just burns more Enjin
-      // API calls on every 15s tick.
+      // Drop the pending row — retrying can't help while the wallet stays claimed.
       await query(`DELETE FROM pending_verifications WHERE id = $1`, [row.id]);
       continue;
     }
 
-    // Get memberships and rules (read-only, outside transaction)
+    // Memberships and their active rules, grouped per group.
     const memberships = await query(
       `SELECT m.id AS member_id, m.group_id, g.title AS group_title, g.telegram_id AS group_telegram_id,
               r.collection_id, r.token_id, r.min_balance
@@ -215,20 +194,15 @@ async function pollPendingVerifications(bot: Bot) {
       }
     }
 
-    // Check NFT ownership per group (external API calls, outside transaction)
     const verifiedGroups: Array<{ groupId: string; memberId: string; groupTelegramId: string; collectionId: string; tokenId: string | null }> = [];
-    // Set when a group's ownership check was entirely inconclusive (every rule
-    // returned null: Enjin error, or a wallet too large to paginate). We must
-    // NOT finalize the verification in that case — see the guarded delete/notify
-    // below.
+    // True if any group's checks were all inconclusive (every rule returned null).
+    // We must NOT finalize the verification then — see the guarded delete below.
     let sawInconclusiveGroup = false;
 
     for (const [, group] of groupMap) {
       if (group.rules.length === 0) {
-        // Rule-less group: nothing to verify against. Instead of skipping (which
-        // left a stuck PENDING row un-releasable forever), reconcile: flip back
-        // to VERIFIED and unmute. Guarded so VERIFIED/KICKED/LEFT are untouched.
-        // No audit entry — no rule was passed; this is state reconciliation.
+        // Rule-less group: nothing to verify against, so release the PENDING row
+        // back to VERIFIED and unmute. Guarded; no audit (nothing was verified).
         const released = await query(
           `UPDATE members SET status = 'VERIFIED', verification_deadline = NULL
            WHERE id = $1 AND status = 'PENDING'`,
@@ -267,9 +241,8 @@ async function pollPendingVerifications(bot: Bot) {
         }
       }
 
-      // Every rule for this group errored and the member wasn't verified here:
-      // we couldn't fairly decide. Flag it so we retry instead of finalizing a
-      // holder as "no access" (which would strand them PENDING → kicked).
+      // Every rule errored and no match — inconclusive, so retry next tick rather
+      // than finalize a possible holder as "no access".
       if (!holds && !sawCleanResult) sawInconclusiveGroup = true;
     }
 
@@ -283,30 +256,16 @@ async function pollPendingVerifications(bot: Bot) {
         [walletAddress, row.user_id],
       );
 
-      // Keep the pending row when any group was inconclusive so the next tick
-      // retries once Enjin recovers; deleting it here strands a real holder as
-      // PENDING with no recheck path, and kick-expired would then remove them.
-      // The row's expires_at still bounds the retries.
+      // Keep the pending row when a group was inconclusive so the next tick can
+      // retry; deleting it would strand a real holder as PENDING.
       if (!sawInconclusiveGroup) {
         await client.query(`DELETE FROM pending_verifications WHERE id = $1`, [row.id]);
       }
 
       for (const vg of verifiedGroups) {
-        // Two-step write: scheid transitie (audit-waardig) van idempotente
-        // refresh (niet audit-waardig).
-        //
-        // Statement 1 — STRICTE guard `status = 'PENDING'`: alleen een echte
-        // PENDING → VERIFIED transitie schrijft een USER_VERIFIED audit. Voorkomt
-        // dat een user die meerdere keren `/verify` runt (bv. omdat ze niet weten
-        // dat ze al verified zijn) elke keer een nieuwe audit entry produceert.
-        // De vorige guard `IN ('PENDING','VERIFIED')` was te lossig — re-runs op
-        // al-VERIFIED users gaven rowCount > 0 en dus duplicate audits.
-        //
-        // Statement 2 — refresh `last_checked` als status al VERIFIED was. Geen
-        // audit. Houdt onze "wanneer voor 't laatst gecheckt" data fresh zonder
-        // de audit log te vervuilen. Als status LEFT/KICKED is (race-condition
-        // waarbij user vertrok tussen NFT-check en transactie), matcht geen van
-        // beide statements — status blijft correct, geen spurious audit.
+        // Stmt 1 audits only a real PENDING→VERIFIED transition (guard on
+        // status='PENDING'); stmt 2 just refreshes last_checked when already
+        // VERIFIED, no audit. LEFT/KICKED matches neither, so status stays put.
         const transitionResult = await client.query(
           `UPDATE members SET status = 'VERIFIED', last_checked = now()
            WHERE id = $1 AND status = 'PENDING'`,
@@ -319,7 +278,7 @@ async function pollPendingVerifications(bot: Bot) {
              JSON.stringify({ walletAddress, collectionId: vg.collectionId, tokenId: vg.tokenId })],
           );
         } else {
-          // Was al VERIFIED — alleen last_checked bijwerken, geen audit.
+          // Already VERIFIED — refresh last_checked only, no audit.
           await client.query(
             `UPDATE members SET last_checked = now()
              WHERE id = $1 AND status = 'VERIFIED'`,
@@ -331,11 +290,8 @@ async function pollPendingVerifications(bot: Bot) {
       await client.query("COMMIT");
     } catch (err: any) {
       await client.query("ROLLBACK");
-      // 23505 = PostgreSQL unique_violation. The only UNIQUE constraint hit by this transaction
-      // is users.wallet_address — meaning another user claimed this wallet in the race window
-      // between our pre-check SELECT (line 90) and the UPDATE (line 170). Delete the pending row
-      // outside the rolled-back transaction and notify the user — otherwise the cron retries the
-      // same row every 15s until the 10min expiry sweep cleans it up.
+      // 23505 = another account claimed this wallet in the race between the
+      // pre-check and the UPDATE. Drop the pending row and tell the user.
       if (err?.code === "23505") {
         try {
           await query(`DELETE FROM pending_verifications WHERE id = $1`, [row.id]);
@@ -358,10 +314,7 @@ async function pollPendingVerifications(bot: Bot) {
       client.release();
     }
 
-    // Unrestrict verified users in Telegram (outside transaction). Also clear the
-    // existing-member cache so their next message passes through cleanly — without
-    // this, a user who was recently in 'delete' cache mode (basic group fallback)
-    // would still have their messages deleted until the cache expires.
+    // Unmute the verified groups and clear their cache entries.
     for (const vg of verifiedGroups) {
       await safeUnmute(
         bot.api,
@@ -371,14 +324,10 @@ async function pollPendingVerifications(bot: Bot) {
       removeCheckedPair(vg.groupTelegramId, row.user_telegram_id);
     }
 
-    // Held the pending row for a retry (some group was inconclusive): don't
-    // notify yet. A "you don't hold the NFTs" message would be wrong here, and
-    // it would repeat every 15s tick — the resolving tick sends the real one.
-    // Verified groups (if any) were already unmuted above, so partial progress
-    // isn't lost.
+    // Inconclusive: don't notify yet (a "you don't hold the NFTs" message would
+    // be wrong and would repeat every tick). The resolving tick sends the real one.
     if (sawInconclusiveGroup) continue;
 
-    // Notify the user
     let message: string;
     if (verifiedGroups.length > 0) {
       message = `Wallet \`${walletAddress}\` verified! You have access to ${verifiedGroups.length} group(s).`;
@@ -397,16 +346,9 @@ async function pollPendingVerifications(bot: Bot) {
 }
 
 async function recheckVerifiedMembers(bot: Bot) {
-  // EXISTS filter pushes the "is this member due?" decision into SQL so we only load
-  // members that actually need rechecking instead of every verified member in every
-  // active group. A member is due if ANY of their group's rules has an interval
-  // Wallet-less VERIFIED members of ruled groups can never satisfy any rule —
-  // they are pre-first-rule joiners (new-member writes VERIFIED when a group
-  // has no rules yet). Without this they are permanently exempt: every
-  // checking path filters on wallet IS NOT NULL and the message handler skips
-  // VERIFIED rows. Fold them back into normal enforcement: PENDING with the
-  // same 24h window existing members get; cache-clear so their next message
-  // triggers the verification prompt; kick-expired enforces the deadline.
+  // Re-gate wallet-less VERIFIED members of ruled groups — they joined before the
+  // group had rules, so nothing else re-checks them. Flip to PENDING with a 24h
+  // window and clear their cache so the next message prompts them.
   const regated = await query(
     `UPDATE members m SET status = 'PENDING', verification_deadline = now() + interval '24 hours'
      FROM groups g, users u
@@ -423,12 +365,9 @@ async function recheckVerifiedMembers(bot: Bot) {
     console.log(`[CRON] Re-gated ${regated.rowCount} wallet-less VERIFIED member(s) — their groups have active rules now`);
   }
 
-  // that has elapsed since last_checked (equivalent to "min interval has elapsed").
-  // Using EXISTS (not a WHERE predicate on r.check_interval_seconds) is important:
-  // we need to load ALL rule rows for due members, so the NFT check loop evaluates
-  // every rule. Filtering on r.check_interval_seconds directly would drop non-due
-  // rules from the result set and cause false kicks for members holding an NFT
-  // that matches only a longer-interval rule.
+  // Load only members due for a recheck (last_checked older than a rule's interval).
+  // EXISTS, not a WHERE on the interval, so ALL of a due member's rules load —
+  // otherwise a longer-interval rule drops out and causes a false kick.
   const result = await query(
     `SELECT g.id AS group_id, g.telegram_id AS group_telegram_id,
             m.id AS member_id, m.last_checked,
@@ -483,8 +422,6 @@ async function recheckVerifiedMembers(bot: Bot) {
   let checkedCount = 0;
   let kickedCount = 0;
 
-  // SQL already filtered to members due for recheck (see EXISTS clause above), so
-  // every entry in memberChecks is ready to process. No JS-side filter needed.
   const dueMembers = Array.from(memberChecks.values());
 
   const BATCH_SIZE = 5;
@@ -508,17 +445,13 @@ async function recheckVerifiedMembers(bot: Bot) {
         }
       }
 
-      // API error — skip this member, try again next cycle
-      if (apiError) return;
+      if (apiError) return; // inconclusive — retry next cycle
 
       if (stillHoldsNft) {
         await query(`UPDATE members SET last_checked = now() WHERE id = $1`, [member.memberId]);
       } else {
-        // Only update DB + audit log if the kick actually succeeded. Telegram
-        // rejects attempts to ban group creators (and some other edge cases), so
-        // optimistically flipping status to KICKED would leave stale state — user
-        // visible in the group but marked KICKED in DB. Guarding on kickSuccess
-        // keeps DB in sync with reality; the next cron cycle retries automatically.
+        // Flip to KICKED only if the ban succeeded — Telegram rejects banning
+        // group creators, and the next cycle retries.
         let kickSuccess = false;
         try {
           await bot.api.banChatMember(parseInt(member.groupTelegramId), parseInt(member.userTelegramId), {
@@ -527,8 +460,7 @@ async function recheckVerifiedMembers(bot: Bot) {
           kickSuccess = true;
         } catch (err) {
           if (isUserNotParticipantError(err)) {
-            // User already left — stop retrying, reconcile DB with reality.
-            // Guarded VERIFIED → LEFT; no USER_KICKED audit (we didn't kick).
+            // Already left — reconcile to LEFT (guarded), no kick audit.
             await query(`UPDATE members SET status = 'LEFT' WHERE id = $1 AND status = 'VERIFIED'`, [member.memberId]);
             removeCheckedPair(member.groupTelegramId, member.userTelegramId);
             console.log(`[CRON] ${member.userTelegramId} already left ${member.groupTelegramId} — marked LEFT, skipping kick`);
@@ -538,10 +470,8 @@ async function recheckVerifiedMembers(bot: Bot) {
         }
 
         if (kickSuccess) {
-          // Same status-guard pattern as kickExpiredPendingMembers: only flip
-          // VERIFIED → KICKED. If handleMemberLeft already committed LEFT
-          // (user voluntarily left between the recheck SELECT and this UPDATE),
-          // skip the UPDATE and audit log to avoid double-logging.
+          // Guard on status='VERIFIED' so we don't overwrite a LEFT that
+          // handleMemberLeft may have committed in the meantime.
           let didKick = false;
           const client = await pool.connect();
           try {
@@ -566,7 +496,6 @@ async function recheckVerifiedMembers(bot: Bot) {
           }
 
           if (didKick) {
-            // Clear from existing-member cache so they get re-checked if they rejoin
             removeCheckedPair(member.groupTelegramId, member.userTelegramId);
             kickedCount++;
           }
@@ -579,10 +508,8 @@ async function recheckVerifiedMembers(bot: Bot) {
 }
 
 async function kickExpiredPendingMembers(bot: Bot) {
-  // The active-rules EXISTS is the "zero rules = zero enforcement" safety net:
-  // members of rule-less groups are never kicked, even if a PENDING row with a
-  // deadline exists (legacy data, or an admin removed the last rule while
-  // members were mid-verification).
+  // The active-rules EXISTS is the "no rules = no enforcement" safety net: never
+  // kick from a rule-less group even if a PENDING row with a deadline exists.
   const result = await query(
     `SELECT m.id, m.group_id, g.telegram_id AS group_telegram_id,
             m.user_id, u.telegram_id AS user_telegram_id,
@@ -598,10 +525,8 @@ async function kickExpiredPendingMembers(bot: Bot) {
   for (const row of result.rows) {
     const isBan = parseInt(row.previous_kicks) >= 4;
 
-    // Only update DB + audit log if the ban/kick actually succeeded. Telegram
-    // rejects attempts to ban group creators (and some other edge cases), so
-    // optimistically flipping status to KICKED would leave stale state — user
-    // visible in the group but marked KICKED in DB. Next cron tick retries.
+    // Flip status only if the ban succeeded — Telegram rejects banning group
+    // creators; the next tick retries.
     let kickSuccess = false;
     try {
       if (isBan) {
@@ -614,8 +539,7 @@ async function kickExpiredPendingMembers(bot: Bot) {
       kickSuccess = true;
     } catch (err) {
       if (isUserNotParticipantError(err)) {
-        // User already left — stop retrying, reconcile DB with reality.
-        // Guarded PENDING → LEFT; no USER_KICKED/USER_BANNED audit (we didn't kick).
+        // Already left — reconcile to LEFT (guarded), no kick audit.
         await query(`UPDATE members SET status = 'LEFT' WHERE id = $1 AND status = 'PENDING'`, [row.id]);
         removeCheckedPair(row.group_telegram_id, row.user_telegram_id);
         console.log(`[CRON] ${row.user_telegram_id} already left ${row.group_telegram_id} — marked LEFT, skipping kick`);
@@ -626,11 +550,8 @@ async function kickExpiredPendingMembers(bot: Bot) {
 
     if (!kickSuccess) continue;
 
-    // Guarded UPDATE: only flip PENDING → KICKED. If the user left voluntarily
-    // between our SELECT (top of the loop) and this UPDATE, members.status is
-    // now LEFT and we'd otherwise overwrite it + log a spurious USER_KICKED on
-    // top of the existing USER_LEFT. Same-class race as handleMemberLeft's
-    // fix; guarding both sides makes whichever transaction commits first win.
+    // Guard on status='PENDING' so a voluntary LEFT committed in the meantime
+    // isn't overwritten with a spurious KICKED.
     let didKick = false;
     const client = await pool.connect();
     try {
@@ -664,27 +585,11 @@ async function kickExpiredPendingMembers(bot: Bot) {
 }
 
 async function leaveUnverifiedGroups(bot: Bot) {
-  // No-op in open-access mode — no pass exists to enforce, so nothing here
-  // should ever make the bot leave. Mirrors recheckAdminPassOwnership, and
-  // guards the switch-from-early-to-open case where deadlines were left armed.
+  // Nothing to enforce in open-access mode.
   if (!process.env.BOUNCER_COLLECTION_ID) return;
 
-  // Triggers for admin_verify_deadline being set:
-  //   1. bot-added.ts — adder hasn't linked a wallet yet (initial 5-min window)
-  //   2. unlink.ts — an admin ran /unlink; groups they admin get 5 min to re-verify
-  //   3. recheckAdminPassOwnership cron — periodic sweep finds a group with no
-  //      pass-holding admins and arms the deadline (Fix #2)
-  //
-  // A group is safe as long as AT LEAST ONE of its group_admins holds the pass.
-  // This is the multi-admin fix: the original code only checked groups.admin_user_id
-  // (the single first-adder), ignoring co-admins who might still hold the pass.
-  //
-  // Null handling: if the Enjin API errors on EVERY admin we can't fairly decide,
-  // so we skip the tick and let the deadline stay armed for a retry. If we get at
-  // least one clean result and none are `true`, the group genuinely has no
-  // pass-holding admin and we leave.
-  //
-  // admin_user_id is kept as provenance (first-adder) but no longer load-bearing.
+  // A group survives as long as any of its group_admins holds the pass. If every
+  // admin check errors, skip the tick and leave the deadline armed for a retry.
   const result = await query(
     `SELECT g.id, g.telegram_id
      FROM groups g
@@ -721,18 +626,15 @@ async function leaveUnverifiedGroups(bot: Bot) {
     }
 
     if (admins.rows.length > 0 && !sawCleanResult) {
-      // Every admin check errored — can't fairly decide, skip this tick and retry next minute.
+      // Every admin check errored — retry next tick.
       console.warn(
         `[CRON] Skipping leave check for group ${row.telegram_id} — every admin pass check errored`,
       );
       continue;
     }
 
-    // No admins with wallets OR at least one clean `false` with zero `true`:
-    // no admin holds the pass. Leave the group and delete the DB row.
-    // Cascade removes group_admins, nft_rules, members, audit_logs.
-    // Best-effort farewell — a failed send (bot muted, rate limited) must not
-    // block the leave below.
+    // No admin holds the pass: leave and delete the group (cascades child rows).
+    // Best-effort farewell — a failed send must not block the leave.
     try {
       await bot.api.sendMessage(
         parseInt(row.telegram_id),
@@ -742,10 +644,8 @@ async function leaveUnverifiedGroups(bot: Bot) {
       console.error(`[CRON] Failed to send leave notice to ${row.telegram_id}:`, err);
     }
 
-    // Only delete the DB row after we've actually left. If leaveChat fails we
-    // keep the row (deadline still armed) so the next tick retries, instead of
-    // deleting state while still a member — which would let getOrCreateGroup
-    // recreate the group rule-less on the next join and auto-verify everyone.
+    // Delete the row only after actually leaving — otherwise a rejoin would
+    // recreate the group rule-less and auto-verify everyone.
     try {
       await bot.api.leaveChat(parseInt(row.telegram_id));
     } catch (err) {
@@ -759,27 +659,11 @@ async function leaveUnverifiedGroups(bot: Bot) {
   }
 }
 
-// Periodic sweep: for every active group with NO currently-armed
-// admin_verify_deadline, verify that at least one admin still holds the
-// Bouncer Pass. If none do, arm the 5-min deadline — leaveUnverifiedGroups
-// will enforce the eventual kick. Catches the "admin transferred their pass
-// without /unlink'ing" case that the original early-access system missed.
-//
-// Why arm instead of leaving immediately: admins deserve the same 5-min grace
-// window that the /unlink and bot-added flows give. This keeps enforcement
-// consistent across all triggers.
-//
-// Why guard on `admin_verify_deadline IS NULL`: if a deadline is already
-// running (set by /unlink, bot-added, or a prior recheck cycle), we don't want
-// to reset it to a newer timestamp — that would extend their grace window
-// forever as long as we keep detecting them as Pass-less. The existing
-// countdown will fire on its own schedule.
-//
-// Null handling mirrors leaveUnverifiedGroups: if every admin check errored,
-// skip this group this cycle and retry next 5-minute tick.
+// For each active group with no deadline armed, arm the 5-min deadline if no
+// admin still holds the pass (leaveUnverifiedGroups then enforces it). Skips
+// groups that already have a deadline so a running countdown isn't reset.
 async function recheckAdminPassOwnership(_bot: Bot) {
-  // No-op in open-access mode — no pass exists to check against. Saves a DB
-  // query + Enjin API round-trips every 5 minutes.
+  // Nothing to check in open-access mode.
   if (!process.env.BOUNCER_COLLECTION_ID) return;
 
   const groups = await query(
@@ -816,17 +700,12 @@ async function recheckAdminPassOwnership(_bot: Bot) {
     if (anyHolds) continue; // at least one admin still holds — nothing to do
 
     if (admins.rows.length > 0 && !sawCleanResult) {
-      // Every admin check errored this cycle — can't fairly decide, try again
-      // in 5 minutes. This group either has a real problem (all admins lack
-      // the pass) or Enjin is flaky; either way, don't arm a deadline on
-      // unreliable data.
+      // Every admin check errored — don't arm on unreliable data; retry next tick.
       continue;
     }
 
-    // No admin holds the pass (either zero wallets to check, or at least one
-    // clean `false` and zero `true`). Arm the deadline — but only if none is
-    // set, to avoid resetting an existing countdown. Race-safe: the WHERE
-    // clause re-checks admin_verify_deadline at UPDATE time.
+    // No admin holds the pass. Arm the deadline; the WHERE re-checks IS NULL so a
+    // running countdown isn't reset.
     const updateResult = await query(
       `UPDATE groups
        SET admin_verify_deadline = now() + interval '5 minutes'

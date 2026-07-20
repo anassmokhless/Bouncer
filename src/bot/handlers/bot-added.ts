@@ -6,7 +6,7 @@ export async function handleBotAdded(ctx: Context) {
     const update = ctx.myChatMember;
     if (!update) return;
 
-    // Only handle when bot goes from non-member to member/admin
+    // Only handle non-member → member/admin.
     const oldStatus = update.old_chat_member.status;
     const newStatus = update.new_chat_member.status;
 
@@ -16,10 +16,9 @@ export async function handleBotAdded(ctx: Context) {
     const addedBy = update.from;
     const chatId = update.chat.id;
 
-    // Verify the user who added the bot is actually an admin of the chat.
-    // Anonymous admins are reported as the GroupAnonymousBot service account —
-    // Telegram only does that for genuine admins, so it counts as admin proof;
-    // getChatMember on the service account would fail and wrongly refuse them.
+    // The adder must be a group admin. Anonymous admins arrive as the
+    // GroupAnonymousBot service account, which is itself admin proof — skip the
+    // getChatMember check (it would fail on the service account).
     const addedByAnonymousAdmin = addedBy.id === GROUP_ANONYMOUS_BOT_ID;
     if (!addedByAnonymousAdmin) {
         try {
@@ -49,10 +48,7 @@ export async function handleBotAdded(ctx: Context) {
 
     const access = await checkBouncerAccess(addedBy.id.toString());
     if (access === null) {
-        // API error — can't confirm the adder holds the pass. Refuse the add
-        // conservatively (safer than admitting a potential non-holder) but tell
-        // them to retry once the API recovers. Nothing is persisted yet, so a
-        // retry is a clean slate.
+        // Enjin API error — can't confirm the pass, so refuse and ask to retry.
         try {
             await ctx.api.sendMessage(
                 chatId,
@@ -77,29 +73,21 @@ export async function handleBotAdded(ctx: Context) {
         return;
     }
 
-    // Register the group and admin
+    // Register the group and its admin.
     const group = await getOrCreateGroup(chatId.toString(), update.chat.title || "Unknown");
     const user = await getOrCreateUser(addedBy.id.toString(), addedBy.username, addedBy.first_name);
 
-    // Make the user an admin of the group
     await query(
         `INSERT INTO group_admins (group_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
         [group.id, user.id],
     );
 
-    // Record the first-adder as provenance. The early-access gate no longer
-    // reads admin_user_id (it iterates group_admins instead), but the column
-    // is preserved for audit/debug value.
+    // First-adder provenance only; the gate reads group_admins, not this column.
     await query(
         `UPDATE groups SET admin_user_id = $1 WHERE id = $2`,
         [user.id, group.id],
     );
 
-    // By this point the adder is cleared: in early-access mode checkBouncerAccess
-    // already verified their pass (a wallet-less adder was refused and the bot
-    // left above), and in open-access mode no wallet is required. So there's
-    // never a wallet-less adder here to arm a leave-deadline for — an earlier
-    // version had that branch, but it was unreachable and has been removed.
     await ctx.api.sendMessage(
         chatId,
         [

@@ -1,16 +1,11 @@
-// Centralized required-env-var list. Entry points (bot/index.ts, dashboard/server.ts)
-// call validateEnv() immediately after dotenv.config() so misconfiguration is caught
-// at startup rather than surfacing later as broken t.me/undefined URLs, weak session
-// secrets, or connections to the wrong database. To add a new required variable, append
-// its name to REQUIRED_VARS — no call sites need to change; they keep reading
-// process.env.X as before.
+// Required env vars, validated at startup so misconfiguration fails fast.
 const REQUIRED_VARS = [
   "BOT_TOKEN",
   "BOT_USERNAME",
   "DATABASE_URL",
   "ENJIN_API_URL",
   "SESSION_SECRET",
-  // Contact form SMTP — fail fast so /contact doesn't 500 silently on first submit.
+  // Contact-form SMTP.
   "SMTP_HOST",
   "SMTP_USER",
   "SMTP_PASS",
@@ -24,10 +19,8 @@ export function validateEnv() {
     process.exit(1);
   }
 
-  // NODE_ENV is not required (local dev works without it), but a wrong or
-  // missing value on a deployed instance silently disables production behavior
-  // — most importantly the Secure flag on session/CSRF cookies. Warn loudly so
-  // misconfiguration shows up in the boot logs instead of staying invisible.
+  // NODE_ENV isn't required, but a wrong value silently drops production behavior
+  // (Secure cookies), so warn about it at boot.
   const nodeEnv = process.env.NODE_ENV;
   if (nodeEnv !== "production" && nodeEnv !== "development" && nodeEnv !== "test") {
     console.warn(

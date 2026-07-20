@@ -25,7 +25,7 @@ export async function handleNewMembers(ctx: Context) {
       const user = await getOrCreateUser(telegramId, member.username, member.first_name);
 
       if (rules.rows.length === 0) {
-        // No rules — allow freely
+        // No rules — admit freely.
         await query(
           `INSERT INTO members (group_id, user_id, status)
            VALUES ($1, $2, 'VERIFIED')
@@ -35,12 +35,9 @@ export async function handleNewMembers(ctx: Context) {
         return;
       }
 
-      // Restrict user immediately — mute until verified. In basic groups (not
-      // supergroups) muting isn't supported and silently no-ops; any messages
-      // they send will be deleted on sight by handleExistingMember instead.
+      // Mute until verified (no-op in basic groups; messages get deleted instead).
       await safeMute(ctx.api, ctx.chat!.id, member.id);
 
-      // If user has a wallet, check NFT immediately
       let verified = false;
       let gotCleanApiResult = false;
 
@@ -58,10 +55,8 @@ export async function handleNewMembers(ctx: Context) {
           if (hasNft) {
             verified = true;
 
-            // Audit only on a real transition to VERIFIED. On a rejoin where the
-            // member is already VERIFIED the guarded DO UPDATE matches no row
-            // (WHERE ... IS DISTINCT FROM 'VERIFIED'), so no duplicate
-            // USER_AUTO_VERIFIED entry; a separate refresh keeps last_checked current.
+            // Audit only on a real transition to VERIFIED — the guarded DO UPDATE
+            // matches no row on an already-VERIFIED rejoin, so no duplicate audit.
             const transition = await query(
               `INSERT INTO members (group_id, user_id, status, last_checked)
                VALUES ($1, $2, 'VERIFIED', now())
@@ -82,26 +77,21 @@ export async function handleNewMembers(ctx: Context) {
               );
             }
 
-            // Unrestrict — user has the NFT. No-op in basic groups (they were
-            // never muted there to begin with).
             await safeUnmute(ctx.api, ctx.chat!.id, member.id);
-
             break;
           }
         }
       }
 
-      // Not verified — set as pending (or preserve VERIFIED if API errored on all rules)
       if (!verified) {
-        // If user has wallet but all API calls errored, check existing status
-        // Preserve VERIFIED so the recheck cron can revalidate once API recovers
+        // Wallet present but every rule check errored: keep an existing VERIFIED
+        // status and let the recheck cron revalidate once Enjin recovers.
         if (user.wallet_address && !gotCleanApiResult) {
           const existing = await query(
             `SELECT status FROM members WHERE group_id = $1 AND user_id = $2`,
             [group.id, user.id],
           );
           if (existing.rows.length > 0 && existing.rows[0].status === "VERIFIED") {
-            // Preserve VERIFIED — unrestrict and let recheck cron revalidate
             await safeUnmute(ctx.api, ctx.chat!.id, member.id);
             console.log(`[BOT] Preserved VERIFIED for ${telegramId} — Enjin API errored on all rules`);
             return;
@@ -116,10 +106,6 @@ export async function handleNewMembers(ctx: Context) {
         );
 
         try {
-          // HTML parse mode (not Markdown v1) — Markdown v1 breaks on any `_`
-          // or `*` in first_name (e.g., "Cryptan_19"). HTML only needs `<`, `>`,
-          // `&` escaped, which escapeHtml handles. first_name can be absent on
-          // accounts without a display name, so guard with `|| ""`.
           await ctx.reply([
             `Welcome ${escapeHtml(member.first_name || "")}! Access to this group requires an Enjin NFT.`,
             "",
@@ -134,11 +120,9 @@ export async function handleNewMembers(ctx: Context) {
       }
     }));
 
-    // Surface per-member failures. Promise.allSettled never rejects, so without
-    // this a joiner dropped by a DB/Telegram error (e.g. getOrCreateUser threw
-    // before safeMute) leaves no trace — unrestricted, unlogged, no PENDING row.
-    // They self-heal on their next message (handleExistingMember re-gates them),
-    // but the log makes the gap visible instead of silent.
+    // Log per-member failures — allSettled never rejects, so a joiner dropped by
+    // a DB/Telegram error would otherwise vanish silently (they re-gate on their
+    // next message anyway).
     results.forEach((r, idx) => {
       if (r.status === "rejected") {
         console.error(`[BOT] Failed to process new member ${batch[idx].id} in ${chatId}:`, r.reason);

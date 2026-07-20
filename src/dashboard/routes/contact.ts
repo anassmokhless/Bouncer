@@ -14,9 +14,7 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// Rate limit contact form submissions — the form is public and wired to SMTP, so
-// without this a bot could spam the inbox and get the SMTP account blacklisted.
-// Applied to POST only so legitimate users can still load/refresh the form.
+// Throttle the public SMTP-wired form so a bot can't spam the inbox. POST only.
 const contactLimiter = rateLimit({
   windowMs: 10 * 60 * 1000, // 10 minutes
   limit: 5, // 5 submissions per IP per window
@@ -55,8 +53,7 @@ router.post("/", contactLimiter, async (req: Request, res: Response) => {
     return;
   }
 
-  // Validate Telegram username format: optional @, 5–32 chars, letters/digits/underscore.
-  // This also prevents email header injection via CR/LF in the subject line.
+  // Optional @, 5–32 word chars. Also blocks CR/LF header injection into the subject.
   if (!/^@?[a-zA-Z0-9_]{5,32}$/.test(telegram)) {
     res.render("contact", {
       success: false,
