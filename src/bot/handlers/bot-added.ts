@@ -95,38 +95,17 @@ export async function handleBotAdded(ctx: Context) {
         [user.id, group.id],
     );
 
-    // Only arm the leave-deadline in early-access mode. With no BOUNCER_COLLECTION_ID
-    // the pass gates nothing, so a wallet-less adder is fine — arming here would make
-    // leaveUnverifiedGroups kick the bot out (and cascade-delete the group) 5 minutes
-    // after a perfectly normal open-access add.
-    if (!user.wallet_address && process.env.BOUNCER_COLLECTION_ID) {
-        // Store deadline so the cron can enforce it even after a restart
-        await query(
-            `UPDATE groups SET admin_verify_deadline = now() + interval '5 minutes' WHERE id = $1`,
-            [group.id],
-        );
-
-        await ctx.api.sendMessage(
-            chatId,
-            [
-                "Bouncer is active! Use /addrule to set up NFT gating.",
-                "",
-                "⚠️ Make sure to promote me to admin so I can manage members.",
-                "",
-                `You haven't linked a wallet yet. <a href="https://t.me/${process.env.BOT_USERNAME}?start=verify">DM me to verify your wallet</a>.`,
-                "",
-                "You have 5 minutes to link your wallet or I'll leave this group.",
-            ].join("\n"),
-            { parse_mode: "HTML" },
-        );
-    } else {
-        await ctx.api.sendMessage(
-            chatId,
-            [
-                "Bouncer is active! Use /addrule to set up NFT gating.",
-                "",
-                "⚠️ Make sure to promote me to admin so I can manage members.",
-            ].join("\n"),
-        );
-    }
+    // By this point the adder is cleared: in early-access mode checkBouncerAccess
+    // already verified their pass (a wallet-less adder was refused and the bot
+    // left above), and in open-access mode no wallet is required. So there's
+    // never a wallet-less adder here to arm a leave-deadline for — an earlier
+    // version had that branch, but it was unreachable and has been removed.
+    await ctx.api.sendMessage(
+        chatId,
+        [
+            "Bouncer is active! Use /addrule to set up NFT gating.",
+            "",
+            "⚠️ Make sure to promote me to admin so I can manage members.",
+        ].join("\n"),
+    );
 }

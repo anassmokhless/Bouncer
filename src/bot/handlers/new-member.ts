@@ -58,17 +58,29 @@ export async function handleNewMembers(ctx: Context) {
           if (hasNft) {
             verified = true;
 
-            await query(
+            // Audit only on a real transition to VERIFIED. On a rejoin where the
+            // member is already VERIFIED the guarded DO UPDATE matches no row
+            // (WHERE ... IS DISTINCT FROM 'VERIFIED'), so no duplicate
+            // USER_AUTO_VERIFIED entry; a separate refresh keeps last_checked current.
+            const transition = await query(
               `INSERT INTO members (group_id, user_id, status, last_checked)
                VALUES ($1, $2, 'VERIFIED', now())
-               ON CONFLICT (group_id, user_id) DO UPDATE SET status = 'VERIFIED', last_checked = now()`,
+               ON CONFLICT (group_id, user_id) DO UPDATE SET status = 'VERIFIED', last_checked = now()
+               WHERE members.status IS DISTINCT FROM 'VERIFIED'
+               RETURNING id`,
               [group.id, user.id],
             );
-
-            await query(
-              `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
-              [group.id, user.id, "USER_AUTO_VERIFIED", JSON.stringify({ collectionId: rule.collection_id })],
-            );
+            if ((transition.rowCount ?? 0) > 0) {
+              await query(
+                `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
+                [group.id, user.id, "USER_AUTO_VERIFIED", JSON.stringify({ collectionId: rule.collection_id })],
+              );
+            } else {
+              await query(
+                `UPDATE members SET last_checked = now() WHERE group_id = $1 AND user_id = $2`,
+                [group.id, user.id],
+              );
+            }
 
             // Unrestrict — user has the NFT. No-op in basic groups (they were
             // never muted there to begin with).

@@ -234,7 +234,11 @@ export function registerSetupCommands(bot: Bot) {
   });
 
   bot.command("rules", async (ctx) => {
-    if (ctx.chat?.type === "private") return;
+    // Same gate as the other setup commands — /rules was relying only on the
+    // group-command middleware, so a group admin without a Bouncer Pass could
+    // read rule config in early-access mode while every sibling command required
+    // the pass. (In open access checkBouncerAccess is always true, so no change.)
+    if (!(await isAuthorizedAdmin(ctx))) return;
 
     const chatId = ctx.chat!.id.toString();
     const result = await query(
@@ -262,7 +266,9 @@ export function registerSetupCommands(bot: Bot) {
     if (!(await isAuthorizedAdmin(ctx))) return;
 
     const text = ctx.message?.text || "";
-    const ruleNumber = parseInt(text.split(" ")[1]);
+    // Split on whitespace runs so a double space ("/removerule  2", common on
+    // mobile) doesn't yield an empty arg — matches the /addrule parsing.
+    const ruleNumber = parseInt(text.trim().split(/\s+/)[1]);
 
     if (!ruleNumber || ruleNumber < 1) {
       await ctx.reply(
@@ -350,7 +356,8 @@ export function registerSetupCommands(bot: Bot) {
     if (!(await isAuthorizedAdmin(ctx))) return;
 
     const text = ctx.message?.text || "";
-    const input = text.split(" ")[1];
+    // Whitespace-run split so a double space doesn't produce an empty arg.
+    const input = text.trim().split(/\s+/)[1];
     const hours = parseFloat(input);
 
     if (!hours || !isFinite(hours)) {
