@@ -34,17 +34,35 @@ app.set("trust proxy", Number.isFinite(trustProxyNum) && trustProxyRaw.trim() !=
 app.set("view engine", "ejs");
 app.set("views", path.resolve(import.meta.dirname, "../../views"));
 
+// Per-request CSP nonce. Set before helmet so its script-src directive can read
+// it, and exposed on res.locals so templates render <script nonce="...">. This
+// lets script-src drop 'unsafe-inline': an injected inline <script> can't carry
+// the unguessable per-request nonce, so the browser refuses to run it.
+app.use((_req, res, next) => {
+  res.locals.cspNonce = crypto.randomBytes(16).toString("base64");
+  next();
+});
+
 app.use(
   helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        // 'unsafe-eval' is required for the Telegram Login Widget's data-onauth
-        // mechanism: the widget compiles the onauth attribute string into a
-        // Function() to invoke with the auth blob. Without it, the widget
-        // fails to render at all.
-        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://telegram.org"],
-        scriptSrcAttr: ["'unsafe-inline'"],
+        // Inline <script> blocks carry the per-request nonce (middleware above),
+        // so 'unsafe-inline' is intentionally gone — an injected inline script
+        // can't guess the nonce. 'unsafe-eval' stays: the Telegram Login Widget
+        // compiles its data-onauth attribute into a Function() and won't render
+        // without it. That's the one remaining relaxation, scoped to this single
+        // external widget.
+        scriptSrc: [
+          "'self'",
+          "'unsafe-eval'",
+          "https://telegram.org",
+          (_req, res) => `'nonce-${(res as express.Response).locals.cspNonce}'`,
+        ],
+        // All inline event handlers (onclick/onsubmit) were moved to
+        // addEventListener, so inline handler attributes are fully blocked.
+        scriptSrcAttr: ["'none'"],
         frameSrc: ["'self'", "https://oauth.telegram.org"],
         imgSrc: ["'self'", "data:"],
       },

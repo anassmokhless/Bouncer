@@ -25,7 +25,7 @@
               data-request-access="write"></script>
     </div>
     <p id="login-error" class="text-sm text-red-600 dark:text-red-400 mb-4" hidden></p>
-    <script>
+    <script nonce="<%= cspNonce %>">
       // CSRF token is httpOnly in the cookie (JS can't read it), so the server
       // injects it here for the POST below to echo in the X-CSRF-Token header.
       const CSRF_TOKEN = "<%= csrfToken %>";

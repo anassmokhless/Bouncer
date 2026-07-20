@@ -54,7 +54,7 @@
         </button>
       <% } else { %>
         <span id="recheck-result" class="text-sm text-slate-600 dark:text-gray-400"></span>
-        <button onclick="recheckAll()" id="recheck-btn"
+        <button id="recheck-btn"
                 class="bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-cyan-700 dark:hover:bg-cyan-500 transition-colors">
           Re-check NFTs
         </button>
@@ -116,7 +116,7 @@
                 <td class="px-5 py-3"><%= rule.check_interval_seconds / 3600 %>h</td>
                 <td class="px-5 py-3">
                   <form action="/dashboard/<%= group.id %>/rules/<%= rule.id %>/delete" method="POST"
-                        onsubmit="return confirm('Remove this rule?')">
+                        class="js-remove-rule-form">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                     <button type="submit" class="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 text-xs transition-colors">Remove</button>
                   </form>
@@ -264,7 +264,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="<%= cspNonce %>">
 document.querySelectorAll('[data-date]').forEach(el => {
   const d = el.dataset.date;
   el.textContent = d ? new Date(d).toLocaleString() : 'Never';
@@ -334,6 +334,19 @@ async function recheckAll() {
     btn.textContent = 'Re-check NFTs';
   }
 }
+
+// Bind handlers via addEventListener — no inline onclick/onsubmit, so the CSP
+// can forbid inline handler attributes. This script sits at the end of <body>,
+// so the elements already exist (no DOMContentLoaded needed).
+(function() {
+  const btn = document.getElementById('recheck-btn');
+  if (btn && !btn.disabled) btn.addEventListener('click', recheckAll);
+  document.querySelectorAll('.js-remove-rule-form').forEach(function(form) {
+    form.addEventListener('submit', function(e) {
+      if (!confirm('Remove this rule?')) e.preventDefault();
+    });
+  });
+})();
 </script>
 
 <%- include('partials/footer') %>

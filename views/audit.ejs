@@ -127,7 +127,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="<%= cspNonce %>">
 document.querySelectorAll('[data-date]').forEach(el => {
   const d = el.dataset.date;
   el.textContent = d ? new Date(d).toLocaleString() : 'Never';

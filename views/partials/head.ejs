@@ -14,7 +14,7 @@
       Ook globale __toggleTheme() exposed — de sun/moon button in nav-app
       gebruikt 'm via onclick. Try/catch rond localStorage zodat private
       mode / strict privacy settings de app niet breken. %>
-  <script>
+  <script nonce="<%= cspNonce %>">
     (function() {
       try {
         var saved = localStorage.getItem('theme');
@@ -36,6 +36,14 @@
       var nowDark = document.documentElement.classList.toggle('dark');
       try { localStorage.setItem('theme', nowDark ? 'dark' : 'light'); } catch (_) {}
     };
+    // Bind the theme-toggle buttons (marked data-theme-toggle) via
+    // addEventListener rather than inline onclick, so the CSP can forbid inline
+    // event-handler attributes.
+    document.addEventListener('DOMContentLoaded', function() {
+      document.querySelectorAll('[data-theme-toggle]').forEach(function(btn) {
+        btn.addEventListener('click', window.__toggleTheme);
+      });
+    });
   </script>
 
   <link rel="stylesheet" href="/css/output.css">
