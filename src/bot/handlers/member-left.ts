@@ -23,17 +23,25 @@ export async function handleAdminDemoted(ctx: Context) {
   const telegramId = update.new_chat_member.user.id.toString();
   const chatId = ctx.chat.id.toString();
 
-  const result = await query(
-    `DELETE FROM group_admins
-     WHERE group_id = (SELECT id FROM groups WHERE telegram_id = $1)
-       AND user_id = (SELECT id FROM users WHERE telegram_id = $2)`,
-    [chatId, telegramId],
-  );
-
-  if ((result.rowCount ?? 0) > 0) {
-    console.log(
-      `[BOT] Admin demoted: removed ${telegramId} from group_admins for ${chatId}`,
+  // Self-contained error handling: the chat_member router calls this and then
+  // handleMemberLeft independently, so a DB error here must not reject out of
+  // the router and skip the LEFT-transition write (a demote-straight-to-kicked
+  // would otherwise leave the members row un-flipped).
+  try {
+    const result = await query(
+      `DELETE FROM group_admins
+       WHERE group_id = (SELECT id FROM groups WHERE telegram_id = $1)
+         AND user_id = (SELECT id FROM users WHERE telegram_id = $2)`,
+      [chatId, telegramId],
     );
+
+    if ((result.rowCount ?? 0) > 0) {
+      console.log(
+        `[BOT] Admin demoted: removed ${telegramId} from group_admins for ${chatId}`,
+      );
+    }
+  } catch (err) {
+    console.error(`[BOT] Failed to prune group_admins for demoted ${telegramId} in ${chatId}:`, err);
   }
 }
 
