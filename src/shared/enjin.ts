@@ -13,7 +13,6 @@ function getClient() {
   return _client;
 }
 
-//types
 interface TokenAccountNode {
   balance: string;
 }
@@ -45,7 +44,6 @@ interface GetWalletByVerificationResponse {
   } | null;
 }
 
-//request account verification
 export async function requestAccountVerification(): Promise<{
   qrCode: string;
   verificationId: string;
@@ -63,7 +61,6 @@ export async function requestAccountVerification(): Promise<{
   return data.RequestAccount;
 }
 
-//accountverification (via qr code)
 export async function getVerifiedWallet(
   verificationId: string,
 ): Promise<string | null> {
