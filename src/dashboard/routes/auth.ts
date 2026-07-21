@@ -11,17 +11,25 @@ const router = Router();
 // fetch()es this and navigates on the 204; the global CSRF middleware guards
 // the POST (the page echoes the token in X-CSRF-Token).
 router.post("/telegram/callback", authLimiter, async (req: Request, res: Response) => {
-  const { id, first_name, last_name, username, photo_url, auth_date, hash } = (req.body ?? {}) as Record<string, string>;
+  // Accept strings only: a JSON array like ["123"] stringifies identically in
+  // the HMAC check-string but would reach the DB as a Postgres array literal.
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+  const id = str(body.id);
+  const first_name = str(body.first_name);
+  const last_name = str(body.last_name);
+  const username = str(body.username);
+  const photo_url = str(body.photo_url);
+  const auth_date = str(body.auth_date);
+  const hash = str(body.hash);
 
-  if (!id || !hash) {
+  if (!id || !hash || !auth_date) {
     res.status(400).send("Missing Telegram auth data");
     return;
   }
 
-  // last_name must be forwarded into verifyTelegramLogin even though we don't
-  // persist it — the widget includes it in the HMAC check-string whenever the
-  // user has one on their Telegram profile. Dropping it here is what caused
-  // the "Invalid Telegram login" bug for every user with a last name.
+  // The widget includes last_name in the HMAC check-string whenever the user
+  // has one — forward it even though it isn't persisted.
   const data = { id, first_name, last_name, username, photo_url, auth_date, hash };
 
   if (!verifyTelegramLogin(data)) {

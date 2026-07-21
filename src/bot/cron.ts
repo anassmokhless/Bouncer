@@ -332,10 +332,16 @@ async function pollPendingVerifications(bot: Bot) {
     // be wrong and would repeat every tick). The resolving tick sends the real one.
     if (sawInconclusiveGroup) continue;
 
+    // "You don't hold" is only true when an ACTIVE RULED group rejected them —
+    // rule-less groups were just released above, inactive ones enforce nothing.
+    const enforceableGroups = [...groupMap.values()].filter(
+      (g) => g.isActive && g.rules.length > 0,
+    );
+
     let message: string;
     if (verifiedGroups.length > 0) {
       message = `Wallet \`${walletAddress}\` verified! You have access to ${verifiedGroups.length} group(s).`;
-    } else if (groupMap.size === 0) {
+    } else if (enforceableGroups.length === 0) {
       message = `Wallet \`${walletAddress}\` verified!\n\nJoin an NFT-gated group and I'll automatically check your holdings.`;
     } else {
       message = `Wallet \`${walletAddress}\` verified, but you don't hold the NFTs required for your current groups. You'll stay muted until you do.`;

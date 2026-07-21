@@ -8,7 +8,7 @@ EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
 
---trigger function for updated_at
+-- trigger function for updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -54,7 +54,7 @@ BEFORE UPDATE ON users
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 
---nft rules table
+-- nft rules table
 create table if not exists nft_rules(
     id uuid primary key default gen_random_uuid(),
     group_id uuid not null references groups(id) on delete cascade,
@@ -73,7 +73,7 @@ BEFORE UPDATE ON nft_rules
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 
---members table (join table many to many groups <-> users)
+-- members table (join table many to many groups <-> users)
 create table if not exists members(
     id uuid primary key default gen_random_uuid(),
     group_id uuid not null references groups(id) on delete cascade,
@@ -92,7 +92,7 @@ BEFORE UPDATE ON members
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 
---group admins table
+-- group admins table
 create table if not exists group_admins(
     id uuid primary key default gen_random_uuid(),
     group_id uuid not null references groups(id) on delete cascade,
@@ -111,7 +111,7 @@ create table if not exists audit_logs(
     created_at timestamptz not null default now()
 );
 
---pending verifications table (open qr-codes)
+-- pending verifications table (open qr-codes)
 create table if not exists pending_verifications(
     id uuid primary key default gen_random_uuid(),
     user_id uuid not null references users(id) on delete cascade,
@@ -121,7 +121,7 @@ create table if not exists pending_verifications(
     created_at timestamptz not null default now()
 );
 
---session storage table
+-- session storage table
 create table if not exists session(
     sid varchar not null collate "default",
     sess jsonb not null,
@@ -129,14 +129,14 @@ create table if not exists session(
     primary key(sid)
 );
 
--- indexes 
+-- indexes
 create index if not exists idx_session_expire on session (expire);
 create index if not exists idx_members_last_checked on members (last_checked);
 create index if not exists idx_members_status on members (status);
-create index if not exists idx_audit_logs_created_at on  audit_logs (created_at);
+create index if not exists idx_audit_logs_created_at on audit_logs (created_at);
 create index if not exists idx_nft_rules_group_id on nft_rules (group_id);
 create index if not exists idx_members_user_id on members(user_id);
-create index if not exists idx_pending_verifications_expires on  pending_verifications (expires_at);
-create index if not exists idx_members_group_status on  members(group_id, status);
-create index if not exists idx_members_user_group on  members(user_id, group_id);
+create index if not exists idx_pending_verifications_expires on pending_verifications (expires_at);
+create index if not exists idx_members_group_status on members(group_id, status);
+create index if not exists idx_members_user_group on members(user_id, group_id);
 create index if not exists idx_audit_logs_group_created on audit_logs(group_id, created_at);

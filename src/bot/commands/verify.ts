@@ -34,7 +34,6 @@ export async function verifyCommand(ctx: Context) {
     [user.id],
   );
 
-  //if already pending verification
   if (pending.rows.length > 0) {
     await ctx.reply(
       "You already have a pending verification. Please scan the QR code sent earlier.",
@@ -51,7 +50,7 @@ export async function verifyCommand(ctx: Context) {
     qrCode = result.qrCode;
     verificationId = result.verificationId;
   } catch (error) {
-    console.error("[VERIFY] Failed to request account verification:", error);
+    console.error("[BOT] Failed to request account verification:", error);
     await ctx.reply("Failed to generate QR code. Please try again later.");
     return;
   }

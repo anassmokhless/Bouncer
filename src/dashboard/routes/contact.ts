@@ -33,7 +33,7 @@ router.get("/", (_req: Request, res: Response) => {
 });
 
 router.post("/", contactLimiter, async (req: Request, res: Response) => {
-  const { telegram, email, role, message, _csrf } = req.body;
+  const { telegram, email, role, message } = req.body;
 
   // Validate required fields
   if (!telegram || !email || !role || !message) {

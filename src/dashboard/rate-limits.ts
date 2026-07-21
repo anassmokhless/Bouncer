@@ -40,11 +40,10 @@ export const mutationLimiter = rateLimit({
   },
 });
 
-// DB-heavy authenticated GETs (dashboard list, group detail, audit search),
-// which publicLimiter skips. Keyed by session user id — a logged-in attacker
-// can't rotate identity like an IP, and it's NAT-safe. The ipKeyGenerator
-// fallback is unreachable (requireLogin runs first) but keeps v8 from flagging
-// a raw req.ip and normalizes IPv6 if a route is ever mounted without login.
+// DB-heavy GETs (dashboard list, group detail, audit search, landing page).
+// Keyed by session user id when logged in — a logged-in attacker can't rotate
+// identity like an IP, and it's NAT-safe. Anonymous traffic (the public GET /)
+// falls back to normalized per-IP keying.
 export const readLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   limit: 120,

@@ -85,7 +85,9 @@
     <ul class="space-y-2 text-slate-600 dark:text-gray-400 text-sm list-disc pl-5 leading-relaxed">
       <li>You need a Telegram account.</li>
       <li>You must control the Enjin wallet you link &mdash; linking a wallet you don't own is a violation of these terms.</li>
+      <% if (earlyAccess) { %>
       <li>To add Bouncer to a group as an admin, you must hold a valid <strong class="text-slate-800 dark:text-gray-200">Bouncer MFT</strong> (early access requirement).</li>
+      <% } %>
     </ul>
 
     <h3 class="text-lg font-semibold text-slate-900 dark:text-gray-100 mt-8 mb-3">Acceptable use</h3>

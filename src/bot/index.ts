@@ -160,7 +160,7 @@ async function main() {
   startCronJobs(bot);
   await bot.start({
     onStart: () => console.log("[BOT] Running! Listening for messages..."),
-    allowed_updates: ["message", "chat_member", "my_chat_member", "callback_query"],
+    allowed_updates: ["message", "chat_member", "my_chat_member"],
   });
 }
 

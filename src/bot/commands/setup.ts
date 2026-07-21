@@ -2,7 +2,7 @@ import { Bot, Context } from "grammy";
 import { query } from "../../shared/db.js";
 import { getOrCreateGroup, getOrCreateUser, checkBouncerAccess, releasePendingMembers } from "../helpers.js";
 import { collectionExists, tokenExists } from "../../shared/enjin.js";
-import { removeCheckedPair } from "../handlers/existing-member.js";
+import { removeCheckedPair, clearGroupCheckedPairs } from "../handlers/existing-member.js";
 
 // Group admin who also holds the pass (or open-access).
 async function isAuthorizedAdmin(ctx: Context): Promise<boolean> {
@@ -23,7 +23,7 @@ async function isAuthorizedAdmin(ctx: Context): Promise<boolean> {
         return false;
       }
     } catch (e) {
-      console.error(e);
+      console.error("[BOT] Admin status check failed:", e);
       return false;
     }
   }
@@ -175,6 +175,9 @@ export function registerSetupCommands(bot: Bot) {
          VALUES ($1, $2, $3, $4)`,
         [group.id, collectionId, tokenId, minBalance],
       );
+
+      // Users cached as 'skip' while the group had no rules must re-check now.
+      clearGroupCheckedPairs(chatId);
 
       const admin = await syncAdmin(ctx, group.id);
 

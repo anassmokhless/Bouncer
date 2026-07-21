@@ -1,5 +1,5 @@
 {
-  "name": "NFT Gate Bot",
+  "name": "Bouncer",
   "image": "mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm",
   "remoteUser": "node",
   "forwardPorts": [3000],

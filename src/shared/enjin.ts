@@ -202,9 +202,11 @@ export async function checkNftOwnership(
 
       if (!data.GetWallet) return false;
 
-      // Defensive: the server already scopes to this token.
+      // Defensive: the server already scopes to this token. Compare as BigInt —
+      // Enjin serializes tokenId normalized ("7"), so a stored "007" would never
+      // match as a string and every holder would read as a clean not-held.
       const edge = data.GetWallet.tokenAccounts.edges.find(
-        (e) => e.node.token.tokenId === tokenId,
+        (e) => BigInt(e.node.token.tokenId) === BigInt(tokenId),
       );
       if (!edge) return false; // wallet doesn't hold this token
       return parseInt(edge.node.balance) >= minBalance;

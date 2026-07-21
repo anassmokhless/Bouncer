@@ -122,7 +122,7 @@ export async function releasePendingMembers(
     onReleased?.(groupTelegramId, row.user_telegram_id);
   }
   if (released.rows.length > 0) {
-    console.log(`[RULES] Released ${released.rows.length} pending member(s) in now rule-less group ${groupTelegramId}`);
+    console.log(`[BOT] Released ${released.rows.length} pending member(s) in now rule-less group ${groupTelegramId}`);
   }
   return released.rows.length;
 }
@@ -144,7 +144,7 @@ export async function getOrCreateGroup(telegramId: string, title: string) {
   return result.rows[0];
 }
 
-export async function getOrCreateUser(telegramId: string,username?: string,firstName?: string,) {
+export async function getOrCreateUser(telegramId: string, username?: string, firstName?: string) {
   const result = await query(
     `INSERT INTO users (telegram_id, username, first_name)
      VALUES ($1, $2, $3)

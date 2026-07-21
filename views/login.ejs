@@ -19,7 +19,7 @@
       // injects it here for the POST below to echo in the X-CSRF-Token header.
       const CSRF_TOKEN = "<%= csrfToken %>";
       async function onTelegramAuth(user) {
-        // The widget hands us { id, first_name, username, photo_url, auth_date, hash }.
+        // The widget hands us { id, first_name, last_name, username, photo_url, auth_date, hash }.
         // POST it as JSON so the signed blob stays out of the URL. A fetch won't
         // follow the server's redirect as a navigation, so the route replies 204
         // and we navigate here on success.

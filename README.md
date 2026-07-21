@@ -98,7 +98,7 @@ Fill in the values. The important ones:
 | `SESSION_SECRET`                        | Signs dashboard sessions — generate a long random hex string                                        |
 | `POSTGRES_PASSWORD`                     | Password for the bundled Postgres container (skip when using an external database)                  |
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` | Outgoing mail for the contact form (required at startup, even if you don't use the form)            |
-| `CONTACT_EMAIL`                         | Inbox that receives contact form submissions                                                        |
+| `CONTACT_EMAIL`                         | Inbox that receives contact form submissions (required at startup)                                  |
 | `BOUNCER_COLLECTION_ID`                 | Optional: restrict _adding the bot_ to holders of this collection. Leave blank to let anyone use it |
 
 The full list with comments is in [.env.example](.env.example). Startup fails
@@ -144,10 +144,10 @@ than a few minutes fast makes every login fail with "Invalid Telegram login".
        │                   │
        └───────┬───────────┘
                │
-        ┌──────▼──────┐        ┌─────────────────┐
+        ┌──────▼──────┐        ┌──────────────────┐
         │  PostgreSQL │        │  Enjin Platform  │
         └─────────────┘        │  (GraphQL API)   │
-                               └─────────────────┘
+                               └──────────────────┘
 ```
 
 Both containers share one database. The bot runs a set of cron jobs

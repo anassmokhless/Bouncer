@@ -13,8 +13,7 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
-import { pool } from "../shared/db.js";
-import { query } from "../shared/db.js";
+import { pool, query } from "../shared/db.js";
 import authRoutes from "./routes/auth.js";
 import groupsRoutes from "./routes/groups.js";
 import auditRoutes from "./routes/audit.js";
@@ -161,6 +160,7 @@ app.get("/", readLimiter, async (_req, res, next) => {
     }
     res.render("landing", {
       botUsername: process.env.BOT_USERNAME,
+      earlyAccess: Boolean(process.env.BOUNCER_COLLECTION_ID),
       ...landingCounts,
     });
   } catch (err) {
@@ -170,7 +170,7 @@ app.get("/", readLimiter, async (_req, res, next) => {
 
 // Legal page (privacy policy + terms of use)
 app.get("/legal", (_req, res) => {
-  res.render("legal");
+  res.render("legal", { earlyAccess: Boolean(process.env.BOUNCER_COLLECTION_ID) });
 });
 
 // Routes

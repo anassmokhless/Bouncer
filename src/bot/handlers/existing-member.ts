@@ -31,6 +31,14 @@ export function removeCheckedPair(chatId: string, userId: string) {
   checkedPairs.delete(`${chatId}:${userId}`);
 }
 
+// Drop every cached pair for a group — called when a rule is added, so users
+// cached as 'skip' while the group was rule-less get re-checked.
+export function clearGroupCheckedPairs(chatId: string) {
+  for (const key of checkedPairs.keys()) {
+    if (key.startsWith(`${chatId}:`)) checkedPairs.delete(key);
+  }
+}
+
 // Drop expired entries.
 export function pruneCheckedPairs() {
   const now = Date.now();
