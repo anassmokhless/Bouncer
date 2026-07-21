@@ -39,7 +39,13 @@
       <p class="text-sm text-slate-500 dark:text-gray-500">Telegram ID: <%= group.telegram_id %></p>
     </div>
     <div class="flex items-center gap-3">
-      <% if (rules.length === 0) { %>
+      <% if (!group.is_active) { %>
+        <button id="recheck-btn" disabled style="opacity: 0.5; cursor: not-allowed;"
+                title="Bouncer was removed from this group."
+                class="bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm">
+          Re-check NFTs
+        </button>
+      <% } else if (rules.length === 0) { %>
         <span class="text-sm text-slate-500 dark:text-gray-500">Add a rule to enable re-checking.</span>
         <button id="recheck-btn" disabled style="opacity: 0.5; cursor: not-allowed;"
                 title="This group has no active rules to check against."
@@ -55,6 +61,15 @@
       <% } %>
     </div>
   </div>
+
+  <% if (!group.is_active) { %>
+    <div class="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded-lg p-3 mb-6 flex items-start gap-2">
+      <svg class="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"></path>
+      </svg>
+      <p class="text-amber-700 dark:text-amber-400 text-sm">Bouncer is no longer in this group — enforcement is paused. Re-add the bot to resume.</p>
+    </div>
+  <% } %>
 
   <% if (typeof accessError !== 'undefined' && accessError) { %>
     <div class="bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-lg p-3 mb-6 flex items-start gap-2">

@@ -128,29 +128,40 @@ app.get("/login", (req, res) => {
   });
 });
 
-// Landing page — fetches live counts from DB on each request. readLimiter
-// covers logged-in visitors, who are exempt from publicLimiter.
+// Landing page. readLimiter covers logged-in visitors, who are exempt from
+// publicLimiter. The counts are cached for 60s — the audit_logs COUNT is a
+// full scan (no index on action), so per-request queries would let anonymous
+// traffic grind the DB.
+let landingCounts: { verifiedUsers: number; verifiedGroups: number; membersProcessed: number } | null = null;
+let landingCountsExpiry = 0;
+
 app.get("/", readLimiter, async (_req, res, next) => {
   try {
-    const [usersResult, groupsResult, processedResult] = await Promise.all([
-      query<{ c: number }>(
-        `SELECT COUNT(*)::int AS c FROM users
-         WHERE is_verified = true AND wallet_address IS NOT NULL`,
-      ),
-      query<{ c: number }>(
-        `SELECT COUNT(*)::int AS c FROM groups WHERE is_active = true`,
-      ),
-      query<{ c: number }>(
-        `SELECT COUNT(*)::int AS c FROM audit_logs
-         WHERE action IN ('USER_VERIFIED', 'USER_AUTO_VERIFIED',
-                          'USER_KICKED', 'USER_BANNED', 'USER_KICKED_MANUAL')`,
-      ),
-    ]);
+    if (!landingCounts || Date.now() >= landingCountsExpiry) {
+      const [usersResult, groupsResult, processedResult] = await Promise.all([
+        query<{ c: number }>(
+          `SELECT COUNT(*)::int AS c FROM users
+           WHERE is_verified = true AND wallet_address IS NOT NULL`,
+        ),
+        query<{ c: number }>(
+          `SELECT COUNT(*)::int AS c FROM groups WHERE is_active = true`,
+        ),
+        query<{ c: number }>(
+          `SELECT COUNT(*)::int AS c FROM audit_logs
+           WHERE action IN ('USER_VERIFIED', 'USER_AUTO_VERIFIED',
+                            'USER_KICKED', 'USER_BANNED', 'USER_KICKED_MANUAL')`,
+        ),
+      ]);
+      landingCounts = {
+        verifiedUsers: usersResult.rows[0].c,
+        verifiedGroups: groupsResult.rows[0].c,
+        membersProcessed: processedResult.rows[0].c,
+      };
+      landingCountsExpiry = Date.now() + 60_000;
+    }
     res.render("landing", {
       botUsername: process.env.BOT_USERNAME,
-      verifiedUsers: usersResult.rows[0].c,
-      verifiedGroups: groupsResult.rows[0].c,
-      membersProcessed: processedResult.rows[0].c,
+      ...landingCounts,
     });
   } catch (err) {
     next(err);

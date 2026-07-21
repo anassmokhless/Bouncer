@@ -99,7 +99,7 @@ router.get("/:id", readLimiter, requireGroupAdmin, async (req: Request, res: Res
 
   const page = Math.max(1, parseInt(req.query.page as string) || 1);
   const pageSize = 25;
-  const search = ((req.query.search as string) || "").trim();
+  const search = (typeof req.query.search === "string" ? req.query.search : "").trim();
   const offset = (page - 1) * pageSize;
 
   const countParams: string[] = [groupId];
@@ -195,10 +195,17 @@ router.post("/:id/recheck", mutationLimiter, requireGroupAdmin, requireBouncerPa
   let rules!: Awaited<ReturnType<typeof query>>;
   let walleted!: Array<{ id: string; wallet_address: string; user_id: string; user_telegram_id: string }>;
   try {
-    const groupResult = await query(`SELECT telegram_id FROM groups WHERE id = $1`, [groupId]);
+    const groupResult = await query(`SELECT telegram_id, is_active FROM groups WHERE id = $1`, [groupId]);
     if (groupResult.rows.length === 0) {
       rechecksInProgress.delete(groupId);
       res.status(404).json({ error: "Group not found" });
+      return;
+    }
+    // Inactive = the bot was removed from the group: every ban would fail and
+    // the job would report a misleading "done, kicked 0".
+    if (!groupResult.rows[0].is_active) {
+      rechecksInProgress.delete(groupId);
+      res.status(400).json({ error: "Bouncer is no longer in this group — re-add the bot first." });
       return;
     }
     groupTelegramId = groupResult.rows[0].telegram_id;
@@ -425,8 +432,11 @@ router.post("/:id/rules/:ruleId/delete", mutationLimiter, requireGroupAdmin, req
 
   // Release stuck PENDING members if that was the last rule (no-op otherwise).
   // No cache callback — that cache lives in the bot process, not here.
-  const groupRow = await query(`SELECT telegram_id FROM groups WHERE id = $1`, [groupId]);
-  if (groupRow.rows.length > 0) {
+  // Skip inactive groups: the unmute can't reach the chat, which would leave
+  // members VERIFIED in the DB but still muted in Telegram. The bot's rule-less
+  // reconcile sweep releases them once the group is re-added.
+  const groupRow = await query(`SELECT telegram_id, is_active FROM groups WHERE id = $1`, [groupId]);
+  if (groupRow.rows.length > 0 && groupRow.rows[0].is_active) {
     await releasePendingMembers(api, groupRow.rows[0].telegram_id);
   }
 

@@ -11,7 +11,7 @@ router.get("/", readLimiter, async (req: Request, res: Response) => {
 
   const page = Math.max(1, parseInt(req.query.page as string) || 1);
   const pageSize = 50;
-  const search = ((req.query.search as string) || "").trim();
+  const search = (typeof req.query.search === "string" ? req.query.search : "").trim();
   const offset = (page - 1) * pageSize;
 
   const adminGroupFilter = `al.group_id IN (
