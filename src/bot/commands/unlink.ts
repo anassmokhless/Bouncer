@@ -74,7 +74,8 @@ export async function unlinkCommand(ctx: Context) {
     if (adminGroupCount > 0 && earlyAccess) {
       await client.query(
         `UPDATE groups SET admin_verify_deadline = now() + interval '5 minutes'
-         WHERE id IN (SELECT group_id FROM group_admins WHERE user_id = $1)`,
+         WHERE id IN (SELECT group_id FROM group_admins WHERE user_id = $1)
+           AND is_active = true`,
         [user.id],
       );
     }

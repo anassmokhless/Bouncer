@@ -105,7 +105,7 @@ export async function handleExistingMember(ctx: Context) {
       [groupId],
     );
 
-    let gotCleanApiResult = false;
+    let sawNull = false;
 
     for (const rule of rules.rows) {
       const hasNft = await checkNftOwnership(
@@ -115,8 +115,7 @@ export async function handleExistingMember(ctx: Context) {
         rule.min_balance,
       );
 
-      if (hasNft === null) continue;
-      gotCleanApiResult = true;
+      if (hasNft === null) { sawNull = true; continue; }
       if (hasNft) {
         await query(
           `INSERT INTO members (group_id, user_id, status, last_checked)
@@ -134,10 +133,11 @@ export async function handleExistingMember(ctx: Context) {
       }
     }
 
-    // Every rule check errored — can't decide, so skip with a backoff instead of
-    // restricting. The recheck cron or their next message re-evaluates once Enjin recovers.
-    if (rules.rows.length > 0 && !gotCleanApiResult) {
-      console.log(`[BOT] Skipped existing member ${userId} in ${chatId} — Enjin API errored on all rules`);
+    // Rules are OR'd — an errored rule may be the one they hold, so any null
+    // without a match is inconclusive: skip with a backoff instead of
+    // restricting. Their next message re-evaluates once Enjin recovers.
+    if (rules.rows.length > 0 && sawNull) {
+      console.log(`[BOT] Skipped existing member ${userId} in ${chatId} — Enjin check inconclusive`);
       setChecked(key, Date.now() + ERROR_BACKOFF_MS);
       return;
     }

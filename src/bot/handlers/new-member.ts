@@ -76,7 +76,7 @@ async function gateJoinedMembers(ctx: Context, joined: User[]) {
       await safeMute(ctx.api, ctx.chat!.id, member.id);
 
       let verified = false;
-      let gotCleanApiResult = false;
+      let sawNull = false;
 
       if (user.wallet_address) {
         for (const rule of rules.rows) {
@@ -87,8 +87,7 @@ async function gateJoinedMembers(ctx: Context, joined: User[]) {
             rule.min_balance,
           );
 
-          if (hasNft === null) continue; // API error — skip this rule
-          gotCleanApiResult = true;
+          if (hasNft === null) { sawNull = true; continue; } // API error — inconclusive
           if (hasNft) {
             verified = true;
 
@@ -121,16 +120,17 @@ async function gateJoinedMembers(ctx: Context, joined: User[]) {
       }
 
       if (!verified) {
-        // Wallet present but every rule check errored: keep an existing VERIFIED
-        // status and let the recheck cron revalidate once Enjin recovers.
-        if (user.wallet_address && !gotCleanApiResult) {
+        // Rules are OR'd — an errored rule may be the one they hold, so any null
+        // is inconclusive: keep an existing VERIFIED status and let the recheck
+        // cron revalidate once Enjin recovers.
+        if (user.wallet_address && sawNull) {
           const existing = await query(
             `SELECT status FROM members WHERE group_id = $1 AND user_id = $2`,
             [group.id, user.id],
           );
           if (existing.rows.length > 0 && existing.rows[0].status === "VERIFIED") {
             await safeUnmute(ctx.api, ctx.chat!.id, member.id);
-            console.log(`[BOT] Preserved VERIFIED for ${telegramId} — Enjin API errored on all rules`);
+            console.log(`[BOT] Preserved VERIFIED for ${telegramId} — Enjin check inconclusive`);
             return;
           }
         }

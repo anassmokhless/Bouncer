@@ -162,19 +162,19 @@ async function pollPendingVerifications(bot: Bot) {
     // Memberships and their active rules, grouped per group.
     const memberships = await query(
       `SELECT m.id AS member_id, m.group_id, g.title AS group_title, g.telegram_id AS group_telegram_id,
+              g.is_active AS group_is_active,
               r.collection_id, r.token_id, r.min_balance
        FROM members m
        JOIN groups g ON g.id = m.group_id
        LEFT JOIN nft_rules r ON r.group_id = m.group_id AND r.is_active = true
        WHERE m.user_id = $1
-         AND g.is_active = true
          AND m.status IN ('PENDING', 'VERIFIED')`,
       [row.user_id],
     );
 
     const groupMap = new Map<
       string,
-      { groupId: string; title: string; memberId: string; groupTelegramId: string; rules: any[] }
+      { groupId: string; title: string; memberId: string; groupTelegramId: string; isActive: boolean; rules: any[] }
     >();
 
     for (const m of memberships.rows) {
@@ -184,6 +184,7 @@ async function pollPendingVerifications(bot: Bot) {
           title: m.group_title,
           memberId: m.member_id,
           groupTelegramId: m.group_telegram_id,
+          isActive: m.group_is_active,
           rules: [],
         });
       }
@@ -219,7 +220,7 @@ async function pollPendingVerifications(bot: Bot) {
       }
 
       let holds = false;
-      let sawCleanResult = false; // at least one rule gave a decisive true/false
+      let sawNull = false;
       for (const rule of group.rules) {
         const hasNft = await checkNftOwnership(
           walletAddress,
@@ -228,8 +229,7 @@ async function pollPendingVerifications(bot: Bot) {
           rule.minBalance,
         );
 
-        if (hasNft === null) continue; // API error / pagination cap — inconclusive
-        sawCleanResult = true;
+        if (hasNft === null) { sawNull = true; continue; } // API error / pagination cap
         if (hasNft) {
           holds = true;
           verifiedGroups.push({
@@ -243,9 +243,11 @@ async function pollPendingVerifications(bot: Bot) {
         }
       }
 
-      // Every rule errored and no match — inconclusive, so retry next tick rather
-      // than finalize a possible holder as "no access".
-      if (!holds && !sawCleanResult) sawInconclusiveGroup = true;
+      // Rules are OR'd, so an errored rule may be the one the user holds: only
+      // an all-clean-false is a real "no". Any null without a match keeps the
+      // group inconclusive and retries next tick. Inactive (bot-kicked) groups
+      // don't block completion — nothing can be enforced there anyway.
+      if (!holds && sawNull && group.isActive) sawInconclusiveGroup = true;
     }
 
     // Transaction: link wallet + delete pending + update memberships + audit logs
@@ -514,7 +516,7 @@ async function kickExpiredPendingMembers(bot: Bot) {
   // kick from a rule-less group even if a PENDING row with a deadline exists.
   const result = await query(
     `SELECT m.id, m.group_id, g.telegram_id AS group_telegram_id,
-            m.user_id, u.telegram_id AS user_telegram_id,
+            m.user_id, u.telegram_id AS user_telegram_id, u.wallet_address,
             (SELECT COUNT(*) FROM audit_logs a
              WHERE a.group_id = m.group_id AND a.user_id = m.user_id AND a.action = 'USER_KICKED') AS previous_kicks
      FROM members m
@@ -534,6 +536,107 @@ async function kickExpiredPendingMembers(bot: Bot) {
       [row.id],
     );
     if (still.rows.length === 0) continue;
+
+    // Ownership backstop for wallet-linked members: the deadline path must not
+    // ban on inconclusive data. Any rule true → verify instead of kick; any
+    // null without a true → retry next tick; ban only on all-clean-false.
+    if (row.wallet_address) {
+      const rules = await query(
+        `SELECT collection_id, token_id, min_balance FROM nft_rules
+         WHERE group_id = $1 AND is_active = true`,
+        [row.group_id],
+      );
+
+      // Rules can vanish between the SELECT above and this point — no rules,
+      // no enforcement.
+      if (rules.rows.length === 0) continue;
+
+      let holds = false;
+      let sawNull = false;
+      let matchedCollectionId: string | null = null;
+
+      for (const rule of rules.rows) {
+        const hasNft = await checkNftOwnership(
+          row.wallet_address, rule.collection_id, rule.token_id, rule.min_balance,
+        );
+        if (hasNft === null) { sawNull = true; continue; }
+        if (hasNft) {
+          holds = true;
+          matchedCollectionId = rule.collection_id;
+          break;
+        }
+      }
+
+      if (holds) {
+        // Don't verify a ghost: if they already left, reconcile to LEFT instead
+        // (the ban path would have done this via USER_NOT_PARTICIPANT).
+        try {
+          const cm = await bot.api.getChatMember(
+            parseInt(row.group_telegram_id), parseInt(row.user_telegram_id),
+          );
+          if (cm.status === "left" || cm.status === "kicked") {
+            await query(`UPDATE members SET status = 'LEFT' WHERE id = $1 AND status = 'PENDING'`, [row.id]);
+            removeCheckedPair(row.group_telegram_id, row.user_telegram_id);
+            console.log(`[CRON] Kick backstop: ${row.user_telegram_id} already left ${row.group_telegram_id} — marked LEFT`);
+            continue;
+          }
+        } catch (err) {
+          if (isUserNotParticipantError(err)) {
+            await query(`UPDATE members SET status = 'LEFT' WHERE id = $1 AND status = 'PENDING'`, [row.id]);
+            removeCheckedPair(row.group_telegram_id, row.user_telegram_id);
+            continue;
+          }
+          // Can't confirm membership — retry next tick.
+          console.error(`[CRON] Kick backstop membership check failed for ${row.user_telegram_id}:`, err);
+          continue;
+        }
+
+        let flippedOk = false;
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          const flipped = await client.query(
+            `UPDATE members SET status = 'VERIFIED', verification_deadline = NULL, last_checked = now()
+             WHERE id = $1 AND status = 'PENDING'`,
+            [row.id],
+          );
+          if ((flipped.rowCount ?? 0) > 0) {
+            await client.query(
+              `INSERT INTO audit_logs (group_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
+              [row.group_id, row.user_id, "USER_AUTO_VERIFIED",
+               JSON.stringify({ collectionId: matchedCollectionId, source: "kick-backstop" })],
+            );
+            flippedOk = true;
+          }
+          await client.query("COMMIT");
+        } catch (err) {
+          await client.query("ROLLBACK");
+          console.error(`[CRON] Kick backstop flip failed for ${row.user_telegram_id}:`, err);
+        } finally {
+          client.release();
+        }
+
+        if (flippedOk) {
+          await safeUnmute(bot.api, parseInt(row.group_telegram_id), parseInt(row.user_telegram_id));
+          removeCheckedPair(row.group_telegram_id, row.user_telegram_id);
+          console.log(`[CRON] Kick backstop verified ${row.user_telegram_id} in ${row.group_telegram_id} — holds the NFT`);
+        }
+        continue;
+      }
+
+      if (sawNull) {
+        // Push the deadline 5 min so the retry is bounded instead of hammering
+        // Enjin every tick; a persistently-null wallet (pagination cap) parks
+        // here indefinitely rather than ever being banned.
+        await query(
+          `UPDATE members SET verification_deadline = now() + interval '5 minutes'
+           WHERE id = $1 AND status = 'PENDING'`,
+          [row.id],
+        );
+        console.log(`[CRON] Skipping kick of ${row.user_telegram_id} in ${row.group_telegram_id} — ownership check inconclusive, retry in 5 min`);
+        continue;
+      }
+    }
 
     const isBan = parseInt(row.previous_kicks) >= 4;
 
