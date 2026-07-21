@@ -137,7 +137,7 @@ export async function getOrCreateGroup(telegramId: string, title: string) {
   const result = await query(
     `INSERT INTO groups (telegram_id, title)
      VALUES ($1, $2)
-     ON CONFLICT (telegram_id) DO UPDATE SET title = $2
+     ON CONFLICT (telegram_id) DO UPDATE SET title = $2, is_active = true
      RETURNING *`,
     [telegramId, title],
   );

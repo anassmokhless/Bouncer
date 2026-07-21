@@ -42,6 +42,10 @@ export function pruneCheckedPairs() {
 export async function handleExistingMember(ctx: Context) {
   if (!ctx.message || !ctx.chat || ctx.chat.type === "private") return;
   if (!ctx.from || ctx.from.is_bot) return;
+  // Channel posts auto-forwarded into a linked discussion group arrive as the
+  // Telegram service user (777000, is_bot=false) with sender_chat set — never
+  // gate those, or every channel post gets deleted and 777000 ends up PENDING.
+  if (ctx.senderChat || ctx.message.is_automatic_forward) return;
 
   const chatId = ctx.chat.id.toString();
   const userId = ctx.from.id.toString();

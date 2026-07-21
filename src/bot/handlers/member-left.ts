@@ -1,6 +1,7 @@
 import { Context } from "grammy";
 import { query, pool } from "../../shared/db.js";
 import { removeCheckedPair } from "./existing-member.js";
+import { clearJoinDedupe } from "./new-member.js";
 
 // On admin → non-admin, drop the user's group_admins row so a demoted admin no
 // longer counts toward the early-access gate. No-op if they weren't recorded.
@@ -87,8 +88,9 @@ export async function handleMemberLeft(ctx: Context) {
   }
 
   if (didUpdate) {
-    // Clear the cache so they re-check on rejoin.
+    // Clear the caches so they re-check on rejoin.
     removeCheckedPair(chatId, telegramId);
+    clearJoinDedupe(chatId, telegramId);
     console.log(`[BOT] Member ${telegramId} left group ${chatId}`);
   }
 }

@@ -166,7 +166,9 @@ async function pollPendingVerifications(bot: Bot) {
        FROM members m
        JOIN groups g ON g.id = m.group_id
        LEFT JOIN nft_rules r ON r.group_id = m.group_id AND r.is_active = true
-       WHERE m.user_id = $1`,
+       WHERE m.user_id = $1
+         AND g.is_active = true
+         AND m.status IN ('PENDING', 'VERIFIED')`,
       [row.user_id],
     );
 
@@ -519,10 +521,20 @@ async function kickExpiredPendingMembers(bot: Bot) {
      JOIN groups g ON g.id = m.group_id
      JOIN users u ON u.id = m.user_id
      WHERE m.status = 'PENDING' AND m.verification_deadline IS NOT NULL AND m.verification_deadline < now()
+       AND g.is_active = true
        AND EXISTS (SELECT 1 FROM nft_rules r WHERE r.group_id = m.group_id AND r.is_active = true)`,
   );
 
   for (const row of result.rows) {
+    // The 15s verify-poll may have flipped this member to VERIFIED since the
+    // SELECT above — re-check just before the ban. The guarded UPDATE below
+    // protects the row, not the already-executed Telegram ban.
+    const still = await query(
+      `SELECT 1 FROM members WHERE id = $1 AND status = 'PENDING'`,
+      [row.id],
+    );
+    if (still.rows.length === 0) continue;
+
     const isBan = parseInt(row.previous_kicks) >= 4;
 
     // Flip status only if the ban succeeded — Telegram rejects banning group
@@ -594,7 +606,8 @@ async function leaveUnverifiedGroups(bot: Bot) {
     `SELECT g.id, g.telegram_id
      FROM groups g
      WHERE g.admin_verify_deadline IS NOT NULL
-       AND g.admin_verify_deadline < now()`,
+       AND g.admin_verify_deadline < now()
+       AND g.is_active = true`,
   );
 
   for (const row of result.rows) {

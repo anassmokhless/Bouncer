@@ -56,7 +56,10 @@ try {
   await migrate();
   console.log("[MIGRATE] Migration completed successfully.");
 } catch (err) {
-  console.error("[MIGRATE] Migration failed. Exiting...");
+  // Reached when readFile throws before the inner try — must not exit 0, or
+  // the deploy pipeline treats the skipped migration as success.
+  console.error("[MIGRATE] Migration failed:", err);
+  process.exitCode = 1;
 } finally {
   await pool.end();
 }

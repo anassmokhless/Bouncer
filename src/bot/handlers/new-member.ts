@@ -1,21 +1,58 @@
 import { Context } from "grammy";
+import type { User } from "grammy/types";
 import { query } from "../../shared/db.js";
 import { checkNftOwnership } from "../../shared/enjin.js";
 import { getOrCreateGroup, getOrCreateUser, safeMute, safeUnmute, escapeHtml } from "../helpers.js";
 
+// A join can arrive twice: as a new_chat_members service message AND as a
+// chat_member update. Dedupe so a member isn't gated/welcomed twice.
+const recentJoins = new Map<string, number>();
+const JOIN_DEDUPE_MS = 60_000;
+
+// Called on member-left so a quick leave-and-rejoin is gated again.
+export function clearJoinDedupe(chatId: string, userId: string) {
+  recentJoins.delete(`${chatId}:${userId}`);
+}
+
+function alreadyHandledJoin(chatId: string, userId: string): boolean {
+  const now = Date.now();
+  for (const [k, expiry] of recentJoins) {
+    if (expiry <= now) recentJoins.delete(k);
+  }
+  const key = `${chatId}:${userId}`;
+  if (recentJoins.has(key)) return true;
+  recentJoins.set(key, now + JOIN_DEDUPE_MS);
+  return false;
+}
+
 export async function handleNewMembers(ctx: Context) {
   const newMembers = ctx.message?.new_chat_members;
   if (!newMembers || !ctx.chat) return;
+  await gateJoinedMembers(ctx, newMembers);
+}
 
-  const chatId = ctx.chat.id.toString();
-  const group = await getOrCreateGroup(chatId, ctx.chat.title || "Unknown");
+// chat_member join transition — the only join signal in large supergroups and
+// for join-request approvals, where Telegram omits the service message.
+export async function handleChatMemberJoined(ctx: Context) {
+  const member = ctx.chatMember?.new_chat_member.user;
+  if (!member || !ctx.chat) return;
+  await gateJoinedMembers(ctx, [member]);
+}
+
+async function gateJoinedMembers(ctx: Context, joined: User[]) {
+  const chatId = ctx.chat!.id.toString();
+  const actualMembers = joined
+    .filter((m) => !m.is_bot)
+    .filter((m) => !alreadyHandledJoin(chatId, m.id.toString()));
+  if (actualMembers.length === 0) return;
+
+  const group = await getOrCreateGroup(chatId, ctx.chat!.title || "Unknown");
 
   const rules = await query(
     `SELECT * FROM nft_rules WHERE group_id = $1 AND is_active = true`,
     [group.id],
   );
 
-  const actualMembers = newMembers.filter((m) => !m.is_bot);
   const BATCH_SIZE = 5;
 
   for (let i = 0; i < actualMembers.length; i += BATCH_SIZE) {

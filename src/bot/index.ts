@@ -12,8 +12,8 @@ import { verifyCommand } from "./commands/verify.js";
 import { unlinkCommand } from "./commands/unlink.js";
 import { statusCommand } from "./commands/status.js";
 import { registerSetupCommands } from "./commands/setup.js";
-import { handleNewMembers } from "./handlers/new-member.js";
-import { handleBotAdded } from "./handlers/bot-added.js";
+import { handleNewMembers, handleChatMemberJoined } from "./handlers/new-member.js";
+import { handleBotAdded, handleBotRemoved } from "./handlers/bot-added.js";
 import { handleMemberLeft, handleAdminDemoted } from "./handlers/member-left.js";
 import { handleExistingMember, removeCheckedPair } from "./handlers/existing-member.js";
 import { handleChatMigration } from "./handlers/migrate.js";
@@ -74,7 +74,11 @@ bot.command("verify", verifyCommand);
 bot.command("unlink", unlinkCommand);
 bot.command("status", statusCommand);
 registerSetupCommands(bot);
-bot.on("my_chat_member", handleBotAdded);
+// Both handlers self-select on their own transition (add vs. remove).
+bot.on("my_chat_member", async (ctx) => {
+  await handleBotAdded(ctx);
+  await handleBotRemoved(ctx);
+});
 // chat_member fires on any membership-status change in a group where the bot
 // is admin. We dispatch to two handlers independently, not as an if/else:
 //   - Admin → non-admin transition (demotion) → prune group_admins row.
@@ -105,6 +109,21 @@ bot.on("chat_member", async (ctx) => {
 
   if (newStatus === "left" || newStatus === "kicked") {
     await handleMemberLeft(ctx);
+  }
+
+  // Plain join (not present → member). Telegram omits the new_chat_members
+  // service message in large supergroups and for join-request approvals, so
+  // this transition is the only gating signal there; new-member.ts dedupes
+  // against the service-message path for groups that get both.
+  const wasIn =
+    oldStatus === "member" ||
+    wasAdmin ||
+    (update.old_chat_member.status === "restricted" && update.old_chat_member.is_member);
+  const isIn =
+    newStatus === "member" ||
+    (update.new_chat_member.status === "restricted" && update.new_chat_member.is_member);
+  if (!wasIn && isIn) {
+    await handleChatMemberJoined(ctx);
   }
 });
 bot.on(":new_chat_members", handleNewMembers);
