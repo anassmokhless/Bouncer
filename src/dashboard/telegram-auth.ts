@@ -16,8 +16,9 @@ interface TelegramLoginData {
 export function verifyTelegramLogin(data: TelegramLoginData): boolean {
   const { hash, ...rest } = data;
 
-  // HMAC-SHA256 is 64 hex chars.
-  if (!hash || !/^[0-9a-f]{64}$/i.test(hash)) return false;
+  // HMAC-SHA256 is 64 hex chars. The typeof guard matters: the body is JSON,
+  // so hash could be an array — regex test coerces it, timingSafeEqual throws.
+  if (typeof hash !== "string" || !/^[0-9a-f]{64}$/i.test(hash)) return false;
 
   const secret = crypto
     .createHash("sha256")

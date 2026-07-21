@@ -19,7 +19,7 @@ import authRoutes from "./routes/auth.js";
 import groupsRoutes from "./routes/groups.js";
 import auditRoutes from "./routes/audit.js";
 import contactRoutes from "./routes/contact.js";
-import { publicLimiter } from "./rate-limits.js";
+import { publicLimiter, readLimiter } from "./rate-limits.js";
 
 const app = express();
 const PgStore = connectPgSimple(session);
@@ -128,8 +128,9 @@ app.get("/login", (req, res) => {
   });
 });
 
-// Landing page — fetches live counts from DB on each request.
-app.get("/", async (_req, res, next) => {
+// Landing page — fetches live counts from DB on each request. readLimiter
+// covers logged-in visitors, who are exempt from publicLimiter.
+app.get("/", readLimiter, async (_req, res, next) => {
   try {
     const [usersResult, groupsResult, processedResult] = await Promise.all([
       query<{ c: number }>(

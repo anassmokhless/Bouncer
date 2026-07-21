@@ -13,9 +13,14 @@ if (!telegramId) {
   process.exit(1);
 }
 
+// SSL from the URL, same rule as shared/db.ts.
+const useSsl = /\bsslmode=(require|verify-ca|verify-full|prefer)\b/.test(
+  process.env.DATABASE_URL ?? "",
+);
+
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: true,
+  ssl: useSsl,
 });
 
 async function seed() {
@@ -27,7 +32,7 @@ async function seed() {
     // Upsert the admin user (you)
     const adminResult = await client.query(
       `INSERT INTO users (telegram_id, username, first_name, wallet_address, is_verified, verified_at)
-       VALUES ($1, 'bouncer_admin', 'Admin', 'efVR2gfKsBQUmMqrLqGr5hGFNJVjvGHnb1JcSRY5p84EqT7Fq', true, now())
+       VALUES ($1, 'bouncer_admin', 'Admin', 'efSjQ3r6J1kFeP8tAu5oDv2PZLexWb4iMyVlIjC2E0qU6Tg8', true, now())
        ON CONFLICT (telegram_id) DO UPDATE SET username = EXCLUDED.username
        RETURNING id`,
       [telegramId],

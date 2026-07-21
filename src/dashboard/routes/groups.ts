@@ -296,7 +296,8 @@ router.post("/:id/recheck", mutationLimiter, requireGroupAdmin, requireBouncerPa
     } catch (err) {
       console.error(`[DASHBOARD] Recheck job for group ${groupId} failed:`, err);
       job.status = "error";
-      job.error = err instanceof Error ? err.message : String(err);
+      // Generic message only — raw pg/Telegram/Enjin errors can leak internals.
+      job.error = "Re-check failed — check the server logs.";
       job.finishedAt = Date.now();
     }
   })();

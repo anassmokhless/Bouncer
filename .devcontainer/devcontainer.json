@@ -1,6 +1,6 @@
 {
   "name": "NFT Gate Bot",
-  "image": "mcr.microsoft.com/devcontainers/typescript-node:1-20-bullseye",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm",
   "remoteUser": "node",
   "forwardPorts": [3000],
   "customizations": {
@@ -16,5 +16,5 @@
       }
     }
   },
-  "postCreateCommand": "npm install -g typescript prettier"
+  "postCreateCommand": "npm install -g typescript prettier && npm ci"
 }

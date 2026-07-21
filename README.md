@@ -42,14 +42,18 @@ Bouncer checks ownership against your rules, and anyone who doesn't qualify
 
 | Command        | Who          | What it does                                              |
 | -------------- | ------------ | --------------------------------------------------------- |
-| `/verify`      | members      | Link an Enjin wallet via QR code                          |
-| `/status`      | members      | Show your wallet link and verification state              |
-| `/unlink`      | members      | Disconnect your wallet                                    |
+| `/start`       | members (DM) | Welcome message and command overview                      |
+| `/verify`      | members (DM) | Link an Enjin wallet via QR code                          |
+| `/status`      | members (DM) | Show your wallet link and verification state              |
+| `/unlink`      | members (DM) | Disconnect your wallet                                    |
 | `/setup`       | group admins | Register the group and sync admins                        |
 | `/addrule`     | group admins | Add an NFT requirement (collection / token / min balance) |
 | `/rules`       | group admins | List the group's active rules                             |
 | `/removerule`  | group admins | Delete a rule                                             |
 | `/setinterval` | group admins | Change the re-check frequency                             |
+
+Member commands work in a DM with the bot — inside groups, commands from
+non-admins are blocked (and count as messages for gating).
 
 ## Self-hosting
 
@@ -89,7 +93,8 @@ Fill in the values. The important ones:
 | `ENJIN_API_TOKEN`                       | Optional token for authenticated Enjin requests                                                     |
 | `SESSION_SECRET`                        | Signs dashboard sessions — generate a long random hex string                                        |
 | `POSTGRES_PASSWORD`                     | Password for the bundled Postgres container (skip when using an external database)                  |
-| `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` | Outgoing mail for the contact form                                                                  |
+| `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` | Outgoing mail for the contact form (required at startup, even if you don't use the form)            |
+| `CONTACT_EMAIL`                         | Inbox that receives contact form submissions                                                        |
 | `BOUNCER_COLLECTION_ID`                 | Optional: restrict _adding the bot_ to holders of this collection. Leave blank to let anyone use it |
 
 The full list with comments is in [.env.example](.env.example). Startup fails
