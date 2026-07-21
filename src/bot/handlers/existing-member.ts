@@ -39,13 +39,45 @@ export function pruneCheckedPairs() {
   }
 }
 
+// "Send as channel" post in a group with active rules — delete it. Rule-less
+// groups enforce nothing, so the post stays.
+async function deleteChannelPost(ctx: Context) {
+  const groupResult = await query(
+    `SELECT g.id FROM groups g
+     JOIN nft_rules r ON r.group_id = g.id AND r.is_active = true
+     WHERE g.telegram_id = $1
+     LIMIT 1`,
+    [ctx.chat!.id.toString()],
+  );
+  if (groupResult.rows.length === 0) return;
+
+  try {
+    await ctx.deleteMessage();
+  } catch (err) {
+    console.error("[BOT] Failed to delete send-as-channel message:", err);
+  }
+}
+
 export async function handleExistingMember(ctx: Context) {
   if (!ctx.message || !ctx.chat || ctx.chat.type === "private") return;
-  if (!ctx.from || ctx.from.is_bot) return;
+
   // Channel posts auto-forwarded into a linked discussion group arrive as the
-  // Telegram service user (777000, is_bot=false) with sender_chat set — never
-  // gate those, or every channel post gets deleted and 777000 ends up PENDING.
-  if (ctx.senderChat || ctx.message.is_automatic_forward) return;
+  // Telegram service user (777000) with sender_chat set — never gate those, or
+  // every channel post gets deleted and 777000 ends up PENDING.
+  if (ctx.message.is_automatic_forward) return;
+
+  if (ctx.senderChat) {
+    // Anonymous admins post as the group itself — only admins can do that.
+    if (ctx.senderChat.id === ctx.chat.id) return;
+    // Any other sender_chat is "send as channel": the real sender is
+    // unattributable and can't be verified, so in a ruled group the message is
+    // removed. Without this, an unverified member could bypass gating by
+    // posting as any channel they own.
+    await deleteChannelPost(ctx);
+    return;
+  }
+
+  if (!ctx.from || ctx.from.is_bot) return;
 
   const chatId = ctx.chat.id.toString();
   const userId = ctx.from.id.toString();

@@ -38,6 +38,10 @@ Bouncer checks ownership against your rules, and anyone who doesn't qualify
    (configurable per group with `/setinterval`), so access stays in sync
    with actual ownership.
 
+Messages posted "as a channel" can't be attributed to a member, so in groups
+with active rules Bouncer removes them. Auto-forwards from the group's linked
+channel and posts by anonymous admins are exempt.
+
 ### Bot commands
 
 | Command        | Who          | What it does                                              |
@@ -46,7 +50,7 @@ Bouncer checks ownership against your rules, and anyone who doesn't qualify
 | `/verify`      | members (DM) | Link an Enjin wallet via QR code                          |
 | `/status`      | members (DM) | Show your wallet link and verification state              |
 | `/unlink`      | members (DM) | Disconnect your wallet                                    |
-| `/setup`       | group admins | Register the group and sync admins                        |
+| `/setup`       | group admins | Show the admin command overview                           |
 | `/addrule`     | group admins | Add an NFT requirement (collection / token / min balance) |
 | `/rules`       | group admins | List the group's active rules                             |
 | `/removerule`  | group admins | Delete a rule                                             |
@@ -59,7 +63,7 @@ non-admins are blocked (and count as messages for gating).
 
 ### What you need
 
-- Node.js 20+ (development) or Docker (production)
+- Node.js 22 (or 20.11+) for development, or Docker for production
 - A PostgreSQL database — the production compose file ships one, so you only
   need to bring your own for development or if you prefer a managed provider
 - A Telegram bot token from [@BotFather](https://t.me/BotFather)
