@@ -27,8 +27,3 @@ In scope: the Bouncer bot and dashboard in this repository.
 Out of scope: vulnerabilities in third-party dependencies (report those to the
 dependency's own project), anything that requires an already-compromised server
 or admin account, and automated-scanner output with no demonstrated impact.
-
-## Supported versions
-
-Development happens on `main`, and fixes land there. There are no separate
-maintained release branches.
