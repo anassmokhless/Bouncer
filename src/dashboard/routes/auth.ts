@@ -11,10 +11,19 @@ const router = Router();
 // fetch()es this and navigates on the 204; the global CSRF middleware guards
 // the POST (the page echoes the token in X-CSRF-Token).
 router.post("/telegram/callback", authLimiter, async (req: Request, res: Response) => {
-  // Accept strings only: a JSON array like ["123"] stringifies identically in
-  // the HMAC check-string but would reach the DB as a Postgres array literal.
+  // Accept only JSON scalars, and normalize to string. The widget sends id and
+  // auth_date as *numbers*, so a strings-only guard here rejected every real
+  // login; anything non-scalar still has to go, because a JSON array like
+  // ["123"] stringifies identically in the HMAC check-string but would reach
+  // the DB as a Postgres array literal. Safe-integer only, so a number always
+  // round-trips to the digits Telegram signed (1e21 would become "1e+21").
   const body = (req.body ?? {}) as Record<string, unknown>;
-  const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+  const str = (v: unknown) =>
+    typeof v === "string"
+      ? v
+      : typeof v === "number" && Number.isSafeInteger(v)
+        ? String(v)
+        : undefined;
   const id = str(body.id);
   const first_name = str(body.first_name);
   const last_name = str(body.last_name);
