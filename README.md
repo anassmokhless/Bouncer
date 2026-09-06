@@ -11,6 +11,13 @@ they hold the NFTs you've configured. Members link their Enjin wallet once,
 Bouncer checks ownership against your rules, and anyone who doesn't qualify
 (or sells their tokens later) gets removed automatically.
 
+> [!NOTE]
+> **The hosted instance is retired.** As of 6 September 2026 there is no
+> public Bouncer bot to add to your group — usage was too low to justify
+> keeping a server running for it. The code is unchanged and fully
+> self-hostable: follow the setup below to run your own. AGPL-3.0, so it
+> stays yours to fork, modify and deploy.
+
 ## Features
 
 - **Wallet verification** — members link their Enjin wallet through a QR code
