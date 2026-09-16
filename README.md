@@ -74,7 +74,9 @@ non-admins are blocked (and count as messages for gating).
 - A PostgreSQL database — the production compose file ships one, so you only
   need to bring your own for development or if you prefer a managed provider
 - A Telegram bot token from [@BotFather](https://t.me/BotFather)
-- Access to the [Enjin Platform](https://platform.enjin.io) GraphQL API
+- An [Enjin Platform](https://platform.enjin.io) account with an API token. The
+  API rejects unauthenticated queries, and `/verify` additionally needs the
+  developer profile on that account completed before it can issue linking codes
 
 ### Telegram setup
 
@@ -101,7 +103,8 @@ Fill in the values. The important ones:
 | `BOT_TOKEN`                             | Token from @BotFather                                                                               |
 | `BOT_USERNAME`                          | Bot username without the `@`                                                                        |
 | `ENJIN_API_URL`                         | Enjin Platform GraphQL endpoint                                                                     |
-| `ENJIN_API_TOKEN`                       | Optional token for authenticated Enjin requests                                                     |
+| `ENJIN_API_TOKEN`                       | Platform API token — required, the API rejects unauthenticated queries                              |
+| `ENJIN_NETWORK` / `ENJIN_CHAIN`         | Chain to query. `ENJIN`/`MATRIX` is mainnet, `CANARY`/`MATRIX` is testnet                            |
 | `SESSION_SECRET`                        | Signs dashboard sessions — generate a long random hex string                                        |
 | `POSTGRES_PASSWORD`                     | Password for the bundled Postgres container (skip when using an external database)                  |
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` | Outgoing mail for the contact form (required at startup, even if you don't use the form)            |
