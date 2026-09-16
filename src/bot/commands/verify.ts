@@ -47,8 +47,9 @@ export async function verifyCommand(ctx: Context) {
 
   try {
     const result = await requestAccountVerification();
-    qrCode = result.qrCode;
-    verificationId = result.verificationId;
+    qrCode = result.qr;
+    // The platform's idempotency key is what GetLinkedWallet polls on.
+    verificationId = result.idempotencyKey;
   } catch (error) {
     console.error("[BOT] Failed to request account verification:", error);
     await ctx.reply("Failed to generate QR code. Please try again later.");

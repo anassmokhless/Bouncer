@@ -4,6 +4,8 @@ const REQUIRED_VARS = [
   "BOT_USERNAME",
   "DATABASE_URL",
   "ENJIN_API_URL",
+  // The platform rejects unauthenticated queries, so this is no longer optional.
+  "ENJIN_API_TOKEN",
   "SESSION_SECRET",
   // Contact-form SMTP.
   "SMTP_HOST",
