@@ -47,8 +47,11 @@ router.post("/", contactLimiter, async (req: Request, res: Response) => {
     return;
   }
 
-  // Basic email format check
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  // Basic email format check. Length is capped *before* the test: the pattern is
+  // ambiguous (`[^\s@]+` also matches the dot), so it backtracks quadratically —
+  // the 100kb urlencoded default lets one request block the event loop for
+  // seconds. 254 is the RFC 5321 maximum address length.
+  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     res.render("contact", { success: false, error: "Please enter a valid email address." });
     return;
   }
