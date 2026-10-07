@@ -1,6 +1,8 @@
 <p align="center">
   <img src="public/images/logo.png" alt="Bouncer" width="120">
+  <img width="1254" height="1254" alt="image" src="https://github.com/user-attachments/assets/9fb20f9f-6853-4079-85c5-08b7eee9ca1b" />
 </p>
+
 
 # Bouncer
 
