@@ -1,6 +1,6 @@
 <p align="center">
   <img src="public/images/logo.png" alt="Bouncer" width="120">
-  
+  <img width="150" height="150" alt="qrcode_Misfits Treasure hunt (3)" src="https://github.com/user-attachments/assets/7498a531-d5b8-4512-82f5-be215bd3af9a" />
 </p>
 
 
